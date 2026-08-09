@@ -1,0 +1,70 @@
+# Stack principal do Tech Challenge: API de triagem + Prometheus + Grafana.
+# Uso:
+#   docker compose up --build            # sobe api + prometheus + grafana
+#   docker compose run --rm train        # treina o modelo (perfil "train")
+#   docker compose run --rm train python -m src.optimization.export_onnx
+services:
+  api:
+    build:
+      context: .
+      target: api
+    image: ml3-f3-tech-challenge-api
+    ports:
+      - "8000:8000"
+    env_file: .env
+    volumes:
+      - ./models:/app/models:ro
+    networks:
+      - ml-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  train:
+    build:
+      context: .
+      target: train
+    image: ml3-f3-tech-challenge-train
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+      - ./metrics:/app/metrics
+    networks:
+      - ml-network
+    profiles:
+      - train
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    networks:
+      - ml-network
+    depends_on:
+      - api
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks:
+      - ml-network
+    depends_on:
+      - prometheus
+
+networks:
+  ml-network:
+    driver: bridge
