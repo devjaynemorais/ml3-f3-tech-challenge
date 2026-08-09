@@ -1,0 +1,40 @@
+project:
+  name: triage_classifier
+  version: "0.1.0"
+
+data:
+  raw_path: data/raw
+  raw_file: triage_reports.csv
+  processed_path: data/processed
+  text_column: text
+  label_column: label
+  labels: [normal, atencao, urgente]
+  n_synthetic_samples: 3000
+
+split:
+  test_size: 0.2
+  val_size: 0.1
+  random_state: 42
+
+features:
+  max_features: 5000
+  ngram_range: [1, 2]
+  min_df: 2
+
+model:
+  type: random_forest # random_forest | logistic_regression
+  random_forest:
+    n_estimators: 200
+    max_depth: 20
+    random_state: 42
+  logistic_regression:
+    C: 1.0
+    max_iter: 1000
+    random_state: 42
+
+artifacts:
+  model_path: models/artifacts
+  pipeline_file: triage_pipeline.joblib
+  onnx_path: models/onnx
+  onnx_file: triage_classifier.onnx
+  metadata_file: model_metadata.json
