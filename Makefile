@@ -12,7 +12,9 @@ POETRY := python -m poetry
 # ─── Ambiente ─────────────────────────────────────────────────────────────────
 
 env:
-	pip install poetry==1.8.3 --quiet
+	python -m ensurepip --upgrade
+	python -m pip install --upgrade pip --quiet
+	python -m pip install poetry==1.8.3 --quiet
 	$(POETRY) install --with dev
 
 install: env
