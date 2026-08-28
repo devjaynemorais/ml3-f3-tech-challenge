@@ -42,7 +42,7 @@ test-cov:
 # Gera o dataset sintético de laudos em data/raw/ (troque por um dataset real
 # do Kaggle/MIMIC-III conforme o README quando disponível)
 dataset:
-	$(POETRY) run python -m scripts.generate_synthetic_dataset
+	$(POETRY) run python -m src.data.make_dataset
 
 train:
 	$(POETRY) run python -m src.training.trainer
