@@ -1,20 +1,42 @@
 project:
-  name: triage_classifier
+  name: medical_text_classifier
   version: "0.1.0"
 
 data:
   raw_path: data/raw
-  raw_file: triage_reports.csv
+  train_file: medical_tc_train.csv
+  test_file: medical_tc_test.csv
+  labels_file: medical_tc_labels.csv
   processed_path: data/processed
+  source_text_column: medical_abstract
+  source_label_column: condition_label
+  labels_id_column: condition_label
+  labels_name_column: condition_name
   text_column: text
   label_column: label
-  labels: [normal, atencao, urgente]
-  n_synthetic_samples: 3000
+  labels:
+    - neoplasms
+    - digestive system diseases
+    - nervous system diseases
+    - cardiovascular diseases
+    - general pathological conditions
+  train_output_file: train.csv
+  validation_output_file: validation.csv
+  test_output_file: test.csv
 
 split:
-  test_size: 0.2
-  val_size: 0.1
+  validation_size: 0.1
   random_state: 42
+
+preprocessing:
+  steps:
+    - unicode_normalization
+    - punctuation_removal
+    - lemmatization
+    - stopword_removal
+  language: english
+  spacy_model: en_core_web_sm
+  preserve_numbers: true
 
 features:
   max_features: 5000
@@ -22,19 +44,35 @@ features:
   min_df: 2
 
 model:
-  type: random_forest # random_forest | logistic_regression
-  random_forest:
-    n_estimators: 200
-    max_depth: 20
-    random_state: 42
+  type: logistic_regression
   logistic_regression:
     C: 1.0
     max_iter: 1000
+    class_weight: balanced
+    n_jobs: -1
+    random_state: 42
+  random_forest:
+    n_estimators: 160
+    max_depth: null
+    class_weight: balanced
+    n_jobs: -1
+    random_state: 42
+  gradient_boosting:
+    n_estimators: 80
+    learning_rate: 0.08
+    max_depth: 3
+    selection_k: 800
     random_state: 42
 
 artifacts:
+  schema_version: 2
   model_path: models/artifacts
   pipeline_file: triage_pipeline.joblib
+  metadata_file: model_metadata.json
   onnx_path: models/onnx
   onnx_file: triage_classifier.onnx
-  metadata_file: model_metadata.json
+  feature_pipeline_file: vectorizer.joblib
+  classes_file: classes.json
+  metrics_path: metrics
+  metrics_file: eval_metrics.json
+
