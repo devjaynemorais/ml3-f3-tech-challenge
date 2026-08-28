@@ -3,13 +3,13 @@
         api compose-build compose-up compose-down \
         airflow-up airflow-down
 
-# `poetry` nem sempre estÃ¡ no PATH (ex.: Windows Store Python instala o script
-# de entrada numa pasta de usuÃ¡rio que nÃ£o entra no PATH automaticamente).
-# `python -m poetry` nÃ£o depende dessa resoluÃ§Ã£o â€” sÃ³ precisa que o pacote
+# `poetry` nem sempre está no PATH (ex.: Windows Store Python instala o script
+# de entrada numa pasta de usuário que não entra no PATH automaticamente).
+# `python -m poetry` não depende dessa resolução — só precisa que o pacote
 # `poetry` esteja instalado no interpretador `python` corrente.
 POETRY := python -m poetry
 
-# â”€â”€â”€ Ambiente â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── Ambiente ─────────────────────────────────────────────────────────────────
 
 env:
 	python -m ensurepip --upgrade
@@ -25,7 +25,7 @@ nlp-resources:
 	$(POETRY) run python -m nltk.downloader stopwords
 	$(POETRY) run python -m pip install --no-cache-dir $(SPACY_MODEL_URL)
 
-# â”€â”€â”€ Qualidade de CÃ³digo â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── Qualidade de Código ──────────────────────────────────────────────────────
 
 lint:
 	$(POETRY) run ruff check src/ tests/ scripts/
@@ -35,7 +35,7 @@ format:
 	$(POETRY) run ruff check --fix src/ tests/ scripts/
 	$(POETRY) run ruff format src/ tests/ scripts/
 
-# â”€â”€â”€ Testes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── Testes ───────────────────────────────────────────────────────────────────
 
 test:
 	$(POETRY) run pytest tests/ -v
@@ -43,9 +43,9 @@ test:
 test-cov:
 	$(POETRY) run pytest tests/ --cov=src --cov-report=html
 
-# â”€â”€â”€ Pipeline de ML (local, sem Docker/Airflow) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── Pipeline de ML (local, sem Docker/Airflow) ────────────────────────────────
 
-# Valida o Medical Abstracts TC Corpus e persiste treino, validaÃ§Ã£o e teste.
+# Valida o Medical Abstracts TC Corpus e persiste treino, validação e teste.
 dataset:
 	$(POETRY) run python -m src.data.make_dataset
 
@@ -61,17 +61,17 @@ export-onnx:
 benchmark-latency:
 	$(POETRY) run python -m scripts.measure_latency
 
-# Pipeline completo: dataset â†’ treino â†’ avaliaÃ§Ã£o â†’ export ONNX â†’ benchmark
+# Pipeline completo: dataset → treino → avaliação → export ONNX → benchmark
 pipeline: dataset train evaluate export-onnx benchmark-latency
 
-# â”€â”€â”€ ServiÃ§o local â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── Serviço local ──────────────────────────────────────────────────────────────
 
 API_PORT ?= 8000
 api:
 	$(POETRY) run uvicorn src.serving.api:app \
 		--host 0.0.0.0 --port $(API_PORT) --reload
 
-# â”€â”€â”€ Docker: API + Prometheus + Grafana â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── Docker: API + Prometheus + Grafana ────────────────────────────────────────
 
 compose-build:
 	docker compose build
@@ -82,7 +82,7 @@ compose-up:
 compose-down:
 	docker compose down
 
-# â”€â”€â”€ Docker: Airflow (orquestraÃ§Ã£o de treino/retreino) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── Docker: Airflow (orquestração de treino/retreino) ─────────────────────────
 
 airflow-up:
 	docker compose -f docker-compose.airflow.yml up -d

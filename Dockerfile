@@ -1,4 +1,4 @@
-# Stage 1: builder â€” install production dependencies with Poetry
+# Stage 1: builder — install production dependencies with Poetry
 FROM python:3.11-slim AS builder
 
 WORKDIR /app
@@ -19,7 +19,7 @@ RUN .venv/bin/python -m nltk.downloader -d /app/.venv/nltk_data stopwords \
     && .venv/bin/python -m pip install --no-cache-dir "${SPACY_MODEL_URL}"
 
 
-# Stage 2: train â€” jobs de treino/avaliaÃ§Ã£o/otimizaÃ§Ã£o (usado pelo Airflow e
+# Stage 2: train — jobs de treino/avaliação/otimização (usado pelo Airflow e
 # pelo `docker compose run --rm train`)
 FROM python:3.11-slim AS train
 
@@ -39,7 +39,7 @@ ENTRYPOINT ["python", "-m"]
 CMD ["src.training.trainer"]
 
 
-# Stage 3: api â€” FastAPI serving endpoint
+# Stage 3: api — FastAPI serving endpoint
 FROM python:3.11-slim AS api
 
 WORKDIR /app

@@ -20,7 +20,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Instalar Poetry e dependÃªncias
+      - name: Instalar Poetry e dependências
         run: |
           pip install poetry==${{ env.POETRY_VERSION }}
           poetry install --with dev
@@ -44,7 +44,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Instalar Poetry e dependÃªncias
+      - name: Instalar Poetry e dependências
         run: |
           pip install poetry==${{ env.POETRY_VERSION }}
           poetry install --with dev

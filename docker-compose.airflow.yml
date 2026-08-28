@@ -1,9 +1,9 @@
-# OrquestraÃ§Ã£o bÃ¡sica de treino/retreino via Airflow (LocalExecutor + Postgres).
+# Orquestração básica de treino/retreino via Airflow (LocalExecutor + Postgres).
 # Compose separado do principal (docker-compose.yml) para manter a stack de
-# monitoramento enxuta â€” sobe sob demanda com `make airflow-up`.
+# monitoramento enxuta — sobe sob demanda com `make airflow-up`.
 #
-# A imagem customizada instala dependÃªncias e recursos NLP durante o build,
-# evitando instalaÃ§Ãµes lentas e nÃ£o reproduzÃ­veis no startup dos serviÃ§os.
+# A imagem customizada instala dependências e recursos NLP durante o build,
+# evitando instalações lentas e não reproduzíveis no startup dos serviços.
 x-airflow-common: &airflow-common
   build:
     context: .
