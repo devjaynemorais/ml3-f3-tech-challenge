@@ -182,6 +182,21 @@ def prepare_dataset(config: ExperimentConfig) -> SplitSummary:
     )
 
 
+def load_processed_split(config: ExperimentConfig, filename: str) -> pd.DataFrame:
+    """Load one canonical processed split and validate its labels."""
+    path = config.data.processed_path / filename
+    if not path.exists():
+        raise FileNotFoundError(
+            f"processed split not found at {path}; run `make dataset`"
+        )
+    required = {config.data.text_column, config.data.label_column}
+    frame = _read_source(path, required)
+    unknown = sorted(set(frame[config.data.label_column]) - set(config.data.labels))
+    if unknown:
+        raise ValueError(f"{path.name} contains unknown labels: {unknown}")
+    return frame
+
+
 def main() -> None:
     """CLI entry point used by Make and Airflow."""
     summary = prepare_dataset(load_config())
