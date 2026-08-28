@@ -1,53 +1,84 @@
 {
   "info": {
-    "name": "Triage Classifier API",
+    "name": "Medical Text Classifier API",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [{ "key": "base_url", "value": "http://localhost:8000" }],
   "item": [
     {
       "name": "Root",
-      "request": {
-        "method": "GET",
-        "url": "{{base_url}}/"
-      }
+      "request": { "method": "GET", "url": "{{base_url}}/" }
     },
     {
       "name": "Health",
-      "request": {
-        "method": "GET",
-        "url": "{{base_url}}/health"
-      }
+      "request": { "method": "GET", "url": "{{base_url}}/health" }
     },
     {
-      "name": "Predict — Urgente",
+      "name": "Metrics",
+      "request": { "method": "GET", "url": "{{base_url}}/metrics" }
+    },
+    {
+      "name": "Swagger Docs",
+      "request": { "method": "GET", "url": "{{base_url}}/docs" }
+    },
+    {
+      "name": "Predict — Neoplasm example",
       "request": {
         "method": "POST",
         "header": [{ "key": "Content-Type", "value": "application/json" }],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"text\": \"Paciente relata dor toracica intensa e subita, irradiando para o braco esquerdo.\"\n}"
+          "raw": "{\n  \"text\": \"Histologic examination revealed an invasive epithelial tumor with regional lymph node involvement.\"\n}"
         },
         "url": "{{base_url}}/predict"
       }
     },
     {
-      "name": "Predict — Normal",
+      "name": "Predict — Digestive example",
       "request": {
         "method": "POST",
         "header": [{ "key": "Content-Type", "value": "application/json" }],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"text\": \"Consulta de rotina, paciente assintomatico.\"\n}"
+          "raw": "{\n  \"text\": \"Endoscopy demonstrated gastric mucosal ulceration associated with persistent epigastric pain.\"\n}"
         },
         "url": "{{base_url}}/predict"
       }
     },
     {
-      "name": "Metrics (Prometheus)",
+      "name": "Predict — Nervous system example",
       "request": {
-        "method": "GET",
-        "url": "{{base_url}}/metrics"
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"text\": \"Magnetic resonance imaging showed multiple demyelinating lesions in the cerebral white matter.\"\n}"
+        },
+        "url": "{{base_url}}/predict"
+      }
+    },
+    {
+      "name": "Predict — Cardiovascular example",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"text\": \"Echocardiography showed reduced left ventricular ejection fraction and ventricular dilation.\"\n}"
+        },
+        "url": "{{base_url}}/predict"
+      }
+    },
+    {
+      "name": "Predict — General pathology example",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"text\": \"The inflammatory response included fever, elevated biomarkers and diffuse tissue edema.\"\n}"
+        },
+        "url": "{{base_url}}/predict"
       }
     }
   ]

@@ -1,8 +1,8 @@
 {
-  "title": "Triage API — Overview",
+  "title": "Medical Text Classifier API — Overview",
   "uid": "triage-api-overview",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "editable": true,
   "timezone": "browser",
   "time": { "from": "now-30m", "to": "now" },
@@ -40,7 +40,7 @@
     },
     {
       "id": 3,
-      "title": "Latência p95 (segundos)",
+      "title": "Latência p50/p95 (segundos)",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
       "targets": [
@@ -71,7 +71,7 @@
     },
     {
       "id": 5,
-      "title": "Distribuição de Classificações de Urgência",
+      "title": "Distribuição de Categorias Médicas",
       "type": "bargauge",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
       "targets": [

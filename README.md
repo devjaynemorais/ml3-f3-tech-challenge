@@ -1,295 +1,214 @@
-# ml3-f3-tech-challenge
+# Medical Text Classifier API
 
-Sistema de **triagem automática de laudos médicos** — classifica o texto de um
-laudo/relato clínico em `normal` / `atencao` / `urgente`, servido via API REST
-em container Docker. FIAP MLE — Tech Challenge Fase 3 (tema: *Deploy de
-Modelo em Produção com Pipeline CI/CD, Monitoramento e Otimização de
-Latência*).
+Sistema MLOps de classificação multiclasse de abstracts médicos públicos em
+inglês, desenvolvido para o Tech Challenge da Fase 3 de Machine Learning
+Engineering da FIAP. O pipeline prepara o Medical Abstracts TC Corpus, treina
+um classificador NLP leve e o serve por uma API FastAPI observável.
 
-## Problema
+O sistema é uma demonstração técnica de apoio à categorização e priorização.
+Ele não realiza diagnóstico, não representa triagem hospitalar real e não
+substitui revisão humana ou validação clínica.
 
-Um hospital de referência precisa priorizar exames de texto assim que eles
-chegam, sem depender de um médico revisar cada laudo manualmente antes da
-fila de atendimento. Um classificador leve de NLP, embarcado numa API,
-permite sinalizar automaticamente os casos potencialmente urgentes — o
-ganho não é "substituir" o julgamento clínico, é reduzir o tempo até que um
-laudo grave chegue à frente de alguém que possa agir.
+## Categorias
 
-## Decisão Arquitetural (Etapa 1 — Deploy em Nuvem)
+A ordem canônica usada em configuração, artefatos e respostas da API é:
 
-**Modo de deploy: real-time, não batch.** Triagem existe para comprimir o
-tempo entre "laudo chegou" e "alguém urgente foi visto" — processar em lote
-(ex.: a cada hora) reintroduz exatamente o atraso que o sistema deveria
-eliminar. A API precisa responder por requisição, com latência baixa e
-previsível (ver seção *Otimização de Latência*).
+1. `neoplasms`
+2. `digestive system diseases`
+3. `nervous system diseases`
+4. `cardiovascular diseases`
+5. `general pathological conditions`
 
-**Provedor recomendado: AWS**, com o seguinte desenho:
+## Arquitetura
 
-| Componente | Serviço AWS | Por quê |
-|---|---|---|
-| Registro de imagem | ECR | Recebe o build do `Dockerfile` (stage `api`) direto do pipeline CI/CD |
-| Execução do container | ECS Fargate | Serverless (sem gerenciar EC2/nós), escala horizontalmente pela carga de requisições, cobra só pelo tempo de execução — adequado a uma API cujo tráfego varia ao longo do dia hospitalar |
-| Exposição/roteamento | Application Load Balancer | Health check em `/health`, TLS termination, distribui entre as tasks do Fargate |
-| Métricas/observabilidade | CloudWatch Container Insights (produção) + a stack local Prometheus/Grafana deste repo (dev) | Em produção, o `/metrics` da API também pode ser raspado por um Prometheus gerenciado (Amazon Managed Service for Prometheus) sem trocar a instrumentação |
-| Orquestração de retreino | Amazon MWAA (Managed Airflow) ou o mesmo `docker-compose.airflow.yml` num EC2/Fargate dedicado | Reaproveita a DAG deste repo sem reescrever a lógica de treino |
+O serviço foi mantido real-time porque o objetivo técnico é disponibilizar uma
+classificação por requisição com baixa latência. A arquitetura combina:
 
-**Alternativas consideradas:**
-- **Azure Container Apps / Azure ML Endpoints** — equivalente ao ECS Fargate
-  em simplicidade operacional; faria sentido se o restante da infra do
-  hospital já estivesse no Azure (ex.: Active Directory, PACS/RIS
-  integrados).
-- **GCP Cloud Run** — provavelmente a opção mais simples de todas (deploy
-  direto de container, scale-to-zero); competitiva se o time já usa
-  BigQuery/Vertex AI para outras cargas de ML do hospital.
+- preprocessing configurável por Strategy e Factory;
+- TF-IDF com Regressão Logística por padrão;
+- Random Forest e Gradient Boosting selecionáveis no YAML;
+- pipeline sklearn persistido e classificador exportável para ONNX Runtime;
+- API FastAPI com modo degradado quando não há artefato válido;
+- Prometheus e Grafana para volume, erros, latência e distribuição de classes;
+- Airflow para `ingest_data -> train_model -> evaluate_model -> export_onnx`;
+- GitHub Actions para lint, testes, teste arquitetural e build da imagem.
 
-A escolha por AWS/Fargate aqui é sobre onde este time já tem mais
-familiaridade operacional e sobre a maturidade do Airflow gerenciado (MWAA)
-— não há um requisito técnico do problema que exclua Azure ou GCP; os três
-resolvem "container real-time com autoscaling" igualmente bem.
+Detalhes e decisões estão em [docs/architecture.md](docs/architecture.md) e as
+limitações do modelo em [docs/model_card.md](docs/model_card.md).
 
-## Stack
+## Decisão de deploy em nuvem
 
-- **Modelo**: TF-IDF + Random Forest / Logistic Regression (`scikit-learn`) — leve o
-  suficiente para treinar em segundos e rodar em CPU.
-- **API**: FastAPI + Uvicorn.
-- **Otimização de latência**: exportação do classificador para **ONNX
-  Runtime** (Etapa 4) — ver `src/optimization/export_onnx.py`.
-- **CI/CD**: GitHub Actions (lint → test → build).
-- **Orquestração de treino/retreino**: Apache Airflow (`docker-compose.airflow.yml`).
-- **Monitoramento**: `prometheus-client` na API + Prometheus + Grafana via Docker Compose.
-- **Empacotamento**: Poetry + Docker multi-stage.
+O desenho recomendado usa AWS ECR para imagens, ECS Fargate para executar a API
+e Application Load Balancer com health check em `/health`. CloudWatch pode
+receber métricas operacionais; a instrumentação Prometheus deste repositório
+também pode ser conectada ao Amazon Managed Service for Prometheus. Para
+retreino, a DAG pode migrar para Amazon MWAA.
 
-## Estrutura do Projeto
+Azure Container Apps/Azure ML Endpoints e GCP Cloud Run são alternativas
+equivalentes. A recomendação por AWS considera familiaridade operacional e não
+uma limitação técnica do classificador.
 
-```
-.
-├── .github/workflows/ci.yml        # pipeline CI/CD (lint → test → build)
-├── airflow/
-│   └── dags/triage_training_dag.py # DAG: ingestão → treino → avaliação → export ONNX
-├── config/config.yaml              # config única do projeto (dados, features, modelo, artefatos)
-├── data/{raw,processed,external}/  # dados brutos e splits (git-ignorados, exceto .gitkeep)
-├── docker-compose.yml              # API + Prometheus + Grafana
-├── docker-compose.airflow.yml      # Airflow (LocalExecutor + Postgres), sobe à parte
-├── Dockerfile                      # stages: builder, train, api
-├── docs/
-│   ├── architecture.md             # detalhamento da decisão arquitetural
-│   └── model_card.md               # ficha do modelo (dados, métricas, limitações)
-├── metrics/                        # eval_metrics.json, latency_comparison.json
-├── models/{artifacts,onnx}/        # pipeline sklearn (.joblib) e classificador ONNX
-├── monitoring/
-│   ├── prometheus/prometheus.yml
-│   └── grafana/{provisioning,dashboards}/
-├── scripts/
-│   ├── generate_synthetic_dataset.py
-│   └── measure_latency.py
-├── src/
-│   ├── config/settings.py          # Pydantic Settings (env vars)
-│   ├── data/make_dataset.py        # carga + split train/val/test
-│   ├── features/text_preprocessing.py
-│   ├── models/{classifier,registry}.py
-│   ├── training/trainer.py
-│   ├── evaluation/evaluate.py
-│   ├── optimization/export_onnx.py
-│   ├── serving/{api,model_loader,metrics,schemas}.py
-│   └── utils/
-├── tests/
-├── Makefile
-└── pyproject.toml
+## Estrutura principal
+
+```text
+config/config.yaml                  configuração tipada do experimento
+data/raw/                           três CSVs originais, fora do Git
+data/processed/                     treino, validação e teste canônicos
+src/data/                           validação, mapeamento e persistência
+src/features/                       Strategies e Factory de preprocessing
+src/models/                         Strategies, Factory e registro do pipeline
+src/training/                       treino apenas no split processado de treino
+src/evaluation/                     métricas de validação e teste oficial
+src/optimization/                   exportação do classificador para ONNX
+src/serving/                        app factory, rotas, schemas e predictors
+airflow/dags/triage_training_dag.py orquestração manual do pipeline
+monitoring/                         Prometheus e dashboard Grafana
+postman/                            coleção e cinco exemplos JSON
+tests/                              testes unitários, integração e arquitetura
 ```
 
-## Início Rápido
+## Dataset
+
+Use os três arquivos do Medical Abstracts TC Corpus:
+
+```text
+data/raw/medical_tc_train.csv
+data/raw/medical_tc_test.csv
+data/raw/medical_tc_labels.csv
+```
+
+Os arquivos de treino e teste devem conter `condition_label` e
+`medical_abstract`; o arquivo de labels deve conter `condition_label` e
+`condition_name`. `make dataset` valida os schemas e o mapeamento, retira 10%
+estratificados somente do treino oficial e persiste:
+
+```text
+data/processed/train.csv
+data/processed/validation.csv
+data/processed/test.csv
+```
+
+O teste oficial permanece integral e nunca participa do fit. Dados, modelos e
+métricas gerados ficam fora do Git. Verifique licença e termos da fonte antes de
+redistribuir o corpus.
+
+## Início rápido
 
 ```bash
-# 1. Instalar Poetry e todas as dependências (prod + dev) em .venv/
 make install
-
-# 2. Configurar variáveis de ambiente
 cp .env.example .env
-
-# 3. Gerar o dataset (sintético por padrão — ver seção "Dataset")
 make dataset
-
-# 4. Treinar o modelo e avaliar
 make train
 make evaluate
-
-# 5. (opcional) Otimizar latência — exporta o classificador para ONNX
 make export-onnx
 make benchmark-latency
-
-# 6. Subir a API localmente
 make api
-# → http://localhost:8000/docs
 ```
 
-### Testando a API
+`make install` instala as dependências, as stopwords NLTK e o modelo spaCy
+`en_core_web_sm 3.8.0`. No Windows, quando `make` não estiver disponível, use o
+interpretador da `.venv` com os módulos indicados nos targets do Makefile.
+
+Depois de iniciar a API, abra `http://localhost:8000/docs`.
+
+## API
+
+| Método | Rota | Contrato |
+|---|---|---|
+| GET | `/` | nome e versão do serviço |
+| GET | `/health` | `ok` com backend ou `degraded` sem artefato válido |
+| POST | `/predict` | recebe `text` e retorna `label`, cinco `scores` e `backend` |
+| GET | `/metrics` | métricas Prometheus |
+| GET | `/docs` | Swagger UI |
+
+Exemplo:
 
 ```bash
 curl -X POST http://localhost:8000/predict \
   -H "Content-Type: application/json" \
-  -d '{"text": "Paciente relata dor toracica intensa e subita, irradiando para o braco esquerdo."}'
+  -d '{"text":"Echocardiography showed reduced left ventricular function."}'
 ```
 
-## Docker
+Texto vazio retorna HTTP 422. Sem modelo carregado, `/health` continua acessível
+em modo degradado e `/predict` retorna HTTP 503. Textos recebidos não são
+incluídos nos logs.
+
+A coleção [postman/Triage-API.postman_collection.json](postman/Triage-API.postman_collection.json)
+contém todos os GETs e cinco exemplos sintéticos de predição.
+
+## Docker e observabilidade
 
 ```bash
-# Build de todas as imagens (api, train)
 make compose-build
-
-# Sobe API + Prometheus + Grafana
 make compose-up
-
-# Treina o modelo dentro do container (perfil "train", não sobe com `up` normal)
-docker compose run --rm train
-docker compose run --rm train python -m src.evaluation.evaluate
-docker compose run --rm train python -m src.optimization.export_onnx
 ```
 
-A API só entra em modo "pronto" (`/health` → `status: ok`) depois que houver
-um modelo salvo em `models/artifacts/`. Sem modelo, ela sobe em modo
-degradado (`503` em `/predict`) — isso é intencional: o container não
-deveria falhar o healthcheck de infraestrutura só porque o modelo ainda não
-foi treinado/promovido.
+Serviços locais:
 
-## API de Serving
+- API: `http://localhost:8000`
+- Prometheus: `http://localhost:9090`
+- Grafana: `http://localhost:3000` (`admin`/`admin` por padrão)
 
-| Método | Rota | Descrição |
-|---|---|---|
-| GET | `/` | metadados do serviço |
-| GET | `/health` | estado de carregamento do modelo |
-| POST | `/predict` | classifica um laudo (`{"text": "..."}` → `label`, `scores`, `backend`) |
-| GET | `/metrics` | métricas no formato Prometheus |
-| GET | `/docs` | Swagger UI (gerado pelo FastAPI) |
+O dashboard provisionado apresenta total e taxa de requisições, taxa de erro,
+latência p50/p95 e distribuição das categorias médicas. As métricas preservadas
+são `http_requests_total`, `http_request_duration_seconds` e
+`triage_predictions_total`.
 
-## Monitoramento
-
-`docker compose up` sobe:
-
-- **API** em `http://localhost:8000` (instrumentada com `prometheus-client` —
-  ver `src/serving/metrics.py`: contagem de requisições por rota/status e
-  histograma de latência).
-- **Prometheus** em `http://localhost:9090`, raspando `api:8000/metrics` a
-  cada 5s (`monitoring/prometheus/prometheus.yml`).
-- **Grafana** em `http://localhost:3000` (login `admin`/`admin` por padrão —
-  troque via `GRAFANA_ADMIN_PASSWORD` no `.env`), com o datasource do
-  Prometheus e o dashboard `Triage API — Overview`
-  (`monitoring/grafana/dashboards/triage-api-overview.json`) **já
-  provisionados automaticamente**, sem passos manuais.
-
-Painéis do dashboard: total de requisições, taxa de erro (%), latência
-p50/p95 por rota, requisições por segundo por rota e distribuição das
-classificações de urgência retornadas pela API.
-
-Para gerar tráfego e ver os gráficos se populando:
+## Airflow
 
 ```bash
-for i in $(seq 1 50); do
-  curl -s -X POST http://localhost:8000/predict \
-    -H "Content-Type: application/json" \
-    -d '{"text": "febre alta com confusao mental"}' > /dev/null
-done
-```
-
-## CI/CD (GitHub Actions)
-
-`.github/workflows/ci.yml` roda em todo push/PR para `main`, em 3 jobs
-encadeados: **lint** (`ruff check` + `ruff format --check`) → **test**
-(`pytest` com cobertura) → **build** (build da imagem Docker do stage `api`,
-validando que o Dockerfile é funcional).
-
-## Orquestração (Airflow)
-
-```bash
-make airflow-up    # sobe Postgres + Airflow (LocalExecutor) via docker-compose.airflow.yml
-# UI em http://localhost:8080 (admin/admin)
+make airflow-up
+# UI: http://localhost:8080 (admin/admin)
 make airflow-down
 ```
 
-A DAG `triage_training` (`airflow/dags/triage_training_dag.py`) encadeia:
+A imagem definida em `Dockerfile.airflow` instala dependências e recursos NLP
+durante o build. A DAG `triage_training` nasce pausada (`schedule=None`) e
+reutiliza as funções de `src/`, sem duplicar lógica de ML.
 
-```
-ingest_data → train_model → evaluate_model → export_onnx
-```
+## ONNX e latência
 
-Cada task chama diretamente as mesmas funções usadas localmente
-(`src.training.trainer.main`, `src.evaluation.evaluate.main`,
-`src.optimization.export_onnx.main`) — a DAG só orquestra a ordem de
-execução, sem duplicar lógica. Ela é criada **pausada**; dispare
-manualmente pela UI ou `airflow dags trigger triage_training` (troque
-`schedule=None` por, por exemplo, `"@weekly"` no arquivo da DAG para
-retreino periódico automático).
+O artefato `models/onnx/vectorizer.joblib` contém todo o prefixo anterior ao
+classificador: preprocessing, TF-IDF e, quando aplicável, seleção/conversão de
+features. Apenas o classificador final é convertido para ONNX. O benchmark usa
+o mesmo contrato `TriagePredictor` nos dois backends e grava
+`metrics/latency_comparison.json`.
 
-## Otimização de Latência (Etapa 4)
+Defina `MODEL_BACKEND=onnx` no `.env` para servir o backend otimizado depois de
+executar `make export-onnx`.
 
-A vetorização TF-IDF permanece em scikit-learn (já é barata); a etapa mais
-cara — o classificador (Random Forest / Logistic Regression) — é exportada
-para **ONNX** via `skl2onnx` e servida com `onnxruntime`
-(`src/optimization/export_onnx.py`). `scripts/measure_latency.py` compara
-os dois caminhos (`pipeline.predict` scikit-learn puro vs.
-`vectorizer.transform` + sessão ONNX) e grava o comparativo em
-`metrics/latency_comparison.json`:
-
-```bash
-make export-onnx
-make benchmark-latency
-cat metrics/latency_comparison.json
-```
-
-Para servir com o backend otimizado, defina `MODEL_BACKEND=onnx` no `.env`
-(ou `MODEL_BACKEND=onnx docker compose up api`) antes de treinar/exportar.
-
-## Dataset
-
-Por padrão (`make dataset`), o repositório gera um **dataset sintético**
-(`scripts/generate_synthetic_dataset.py`) de laudos em português, com as 3
-classes balanceadas (`normal` / `atencao` / `urgente`, 3000 amostras por
-padrão — configurável em `config/config.yaml` →
-`data.n_synthetic_samples`). Isso existe só para que o pipeline seja
-executável de ponta a ponta a partir de um clone limpo, sem depender de
-credenciais externas.
-
-Para usar um dataset real (recomendado antes da entrega final), qualquer
-dataset com uma coluna de texto e uma coluna de rótulo serve — basta
-substituir `data/raw/triage_reports.csv` mantendo as colunas `text`/`label`
-(ou ajustar `data.text_column`/`data.label_column` em `config.yaml`).
-Sugestões do enunciado: [Medical Abstracts TC
-Corpus](https://www.kaggle.com/datasets/chaitanyakck/medical-text) (Kaggle)
-ou recortes do [MIMIC-III](https://physionet.org/content/mimiciii/) (acesso
-controlado).
-
-## Testes
+## Qualidade e CI/CD
 
 ```bash
 make lint
 make test
-make test-cov   # relatório HTML de cobertura em htmlcov/
+make test-cov
 ```
 
-Os testes não dependem de modelo treinado nem de dataset em disco — usam
-dados sintéticos minúsculos gerados em memória, então passam em qualquer
-clone limpo (é isso que o job `test` do CI valida).
+Os testes usam fixtures mínimas em memória e não dependem dos CSVs locais. O
+teste arquitetural analisa a AST e rejeita funções de `src/` com mais de 20
+linhas lógicas. Ruff mantém complexidade McCabe máxima 10.
 
-## Critérios de Avaliação — onde cada um é atendido
+O workflow do GitHub Actions executa lint, testes com cobertura e build do
+stage Docker `api` em pushes e pull requests para `main`.
 
-| Critério | Peso | Onde |
-|---|---|---|
-| Modelagem e Otimização | 20% | `src/models/classifier.py`, `src/optimization/export_onnx.py`, `metrics/latency_comparison.json` |
-| CI/CD (GitHub Actions) | 15% | `.github/workflows/ci.yml` |
-| Orquestração (Airflow) | 15% | `airflow/dags/triage_training_dag.py`, `docker-compose.airflow.yml` |
-| Monitoramento | 20% | `docker-compose.yml`, `src/serving/metrics.py`, `monitoring/` |
-| Documentação (README) | 15% | este arquivo + `docs/architecture.md` |
-| Vídeo STAR | 15% | link: _a adicionar após a gravação_ |
+## Critérios da entrega
 
-## Vídeo STAR
-
-_Link: TODO — adicionar após a gravação (≤ 5 min, método STAR)._
+| Critério | Evidência |
+|---|---|
+| Modelagem e otimização | `src/models/`, `src/optimization/`, métricas geradas |
+| CI/CD | `.github/workflows/ci.yml` |
+| Orquestração | DAG Airflow e `Dockerfile.airflow` |
+| Monitoramento | `docker-compose.yml`, Prometheus e Grafana |
+| Documentação | este README, arquitetura e model card |
+| Vídeo STAR | _link a adicionar somente após a gravação_ |
 
 ## Troubleshooting
 
-- **`poetry: command not found`** — use `python -m poetry` (é o que o
-  `Makefile` já faz internamente) em vez de `poetry` direto, especialmente
-  no Windows quando o script de entrada não está no `PATH`.
-- **Porta ocupada (8000/9090/3000/8080)** — troque via `.env`
-  (`API_PORT`, `PROMETHEUS_PORT`, `GRAFANA_PORT`, `AIRFLOW_PORT`).
-- **`/health` retorna `degraded`** — nenhum modelo foi treinado ainda; rode
-  `make train` (e `make export-onnx` se `MODEL_BACKEND=onnx`).
+- `poetry: command not found`: use `python -m poetry` ou o executável Python da
+  `.venv`.
+- erro de stopwords ou `en_core_web_sm`: execute `make nlp-resources`.
+- `/health` degradado: execute treino e, para ONNX, também a exportação; confira
+  `MODEL_BACKEND` e os paths em `.env`.
+- portas ocupadas: ajuste `API_PORT`, `PROMETHEUS_PORT`, `GRAFANA_PORT` ou
+  `AIRFLOW_PORT` no `.env`.

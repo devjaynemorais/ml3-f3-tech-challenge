@@ -4,8 +4,9 @@ Guia operacional para agentes trabalhando neste repositório.
 
 ## Objetivo do projeto
 
-O objetivo é entregar um sistema de triagem automática de laudos médicos, com um classificador NLP leve
-servido por API REST em container Docker.
+O objetivo é entregar um sistema de classificação de abstracts médicos públicos
+em inglês, com um classificador NLP leve servido por API REST em container
+Docker.
 
 O projeto deve evidenciar, de ponta a ponta:
 
@@ -17,8 +18,10 @@ O projeto deve evidenciar, de ponta a ponta:
 - Documentação clara da decisão arquitetural e instruções de execução.
 - Histórico de commits semântico e organizado.
 
-O modelo classifica textos em `general pathological conditions`, `neoplasms`, `cardiovascular diseases`, `nervous system diseases` e `digestive system diseases`. Ele é um apoio
-à priorização de triagem, não um diagnóstico clínico nem substituto de revisão humana.
+O modelo classifica textos em `neoplasms`, `digestive system diseases`,
+`nervous system diseases`, `cardiovascular diseases` e
+`general pathological conditions`. Ele é um apoio à categorização e
+priorização, não um diagnóstico clínico nem substituto de revisão humana.
 
 ## Mapa rápido do repositório
 
@@ -42,7 +45,7 @@ O modelo classifica textos em `general pathological conditions`, `neoplasms`, `c
 - `src/evaluation/`: avaliação e escrita de métricas em `metrics/`.
 - `src/optimization/`: exportação do classificador para ONNX.
 - `src/serving/`: API, schemas, carregamento do modelo e métricas Prometheus.
-- `scripts/`: geração de dataset sintético e benchmark de latência.
+- `scripts/`: benchmark de latência com textos sintéticos não sensíveis.
 - `airflow/dags/triage_training_dag.py`: DAG de ingestão, treino, avaliação e
   exportação ONNX.
 - `monitoring/`: Prometheus, provisioning do Grafana e dashboard versionado.
@@ -64,9 +67,15 @@ O modelo classifica textos em `general pathological conditions`, `neoplasms`, `c
 
 ### Dados
 
-- O CSV bruto padrão é `data/raw/triage_reports.csv`.
-- As colunas esperadas são `text` e `label`.
-- As labels válidas são `normal`, `atencao` e `urgente`.
+- Os CSVs brutos são `data/raw/medical_tc_train.csv`,
+  `data/raw/medical_tc_test.csv` e `data/raw/medical_tc_labels.csv`.
+- Treino/teste esperam `condition_label` e `medical_abstract`; o mapeamento
+  espera `condition_label` e `condition_name`.
+- As labels válidas, na ordem canônica, são `neoplasms`,
+  `digestive system diseases`, `nervous system diseases`,
+  `cardiovascular diseases` e `general pathological conditions`.
+- A validação usa 10% estratificados somente do treino oficial; o teste oficial
+  deve permanecer integral e fora do fit.
 - Para a entrega final, documente origem, tamanho,
   colunas, licença, limitações e impactos nas métricas.
 - Em dados clínicos ou hospitalares, não exponha identificadores de pacientes,
@@ -74,8 +83,10 @@ O modelo classifica textos em `general pathological conditions`, `neoplasms`, `c
 
 ### Modelo e artefatos
 
-- O pipeline base é `TfidfVectorizer` + `RandomForestClassifier` ou
-  `LogisticRegression`, construído em `src/models/classifier.py`.
+- O pipeline base concatena as Strategies configuradas de preprocessamento,
+  `TfidfVectorizer` e uma Strategy de `LogisticRegression`,
+  `RandomForestClassifier` ou `GradientBoostingClassifier`, construído em
+  `src/models/classifier.py`.
 - O pipeline sklearn treinado deve ser salvo em
   `models/artifacts/triage_pipeline.joblib`.
 - A metadata deve ser salva em `models/artifacts/model_metadata.json`.
@@ -83,9 +94,11 @@ O modelo classifica textos em `general pathological conditions`, `neoplasms`, `c
   - `models/onnx/triage_classifier.onnx`;
   - `models/onnx/vectorizer.joblib`;
   - `models/onnx/classes.json`.
-- O TF-IDF permanece em sklearn no backend ONNX; apenas o classificador é
-  convertido. Não altere isso sem atualizar `src/optimization/export_onnx.py`,
-  `src/serving/model_loader.py`, benchmark, docs e testes.
+- Todo o prefixo de features permanece em sklearn no backend ONNX:
+  preprocessamento, TF-IDF e eventuais seleção/conversão. Apenas o classificador
+  final é convertido. Não altere isso sem atualizar
+  `src/optimization/export_onnx.py`, `src/serving/model_loader.py`, benchmark,
+  docs e testes.
 - Qualquer novo backend de inferência deve implementar o contrato
   `TriagePredictor`: `backend` e `predict(text) -> (label, scores)`.
 
@@ -228,8 +241,7 @@ Antes de considerar a entrega pronta, confira a rubrica:
 
 - Nunca apresente o sistema como diagnóstico automatizado.
 - Descreva o modelo como apoio de priorização ou triagem.
-- Declare limitações do dataset sintético sempre que citar métricas obtidas com
-  ele.
+- Declare que o Medical Abstracts TC Corpus contém abstracts públicos em inglês
+  e não representa triagem hospitalar real nem validação clínica.
 - Para claims clínicos, exija dataset real, validação adequada, revisão humana,
   controle de falsos negativos, rastreabilidade e avaliação ética.
-
