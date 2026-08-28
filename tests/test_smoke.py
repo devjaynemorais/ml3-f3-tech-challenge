@@ -28,7 +28,7 @@ def test_labels_follow_the_corpus_canonical_order() -> None:
 
 
 def test_fastapi_app_loads_with_public_routes() -> None:
-    routes = {route.path for route in app.routes}
+    routes = set(app.openapi()["paths"])
 
     assert {"/", "/health", "/predict", "/metrics"}.issubset(routes)
-
+    assert app.docs_url == "/docs"

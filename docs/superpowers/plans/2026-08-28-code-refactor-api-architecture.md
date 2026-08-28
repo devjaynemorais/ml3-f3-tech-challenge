@@ -556,4 +556,3 @@ Run: `git diff <base-sha>..<head-sha>` plus the complete test suite after fixes.
 Run: `git status --short --branch`
 
 Expected: only ignored runtime artifacts remain outside version control and every implementation block has a semantic commit.
-

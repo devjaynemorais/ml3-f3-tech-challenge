@@ -72,6 +72,10 @@ no_strict_optional = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v --cov=src --cov-report=term-missing"
+filterwarnings = [
+    "ignore:Importing 'parser.split_arg_string'.*:DeprecationWarning",
+    "ignore:Using `httpx` with `starlette.testclient`.*:starlette.exceptions.StarletteDeprecationWarning",
+]
 
 [tool.coverage.report]
 exclude_lines = [

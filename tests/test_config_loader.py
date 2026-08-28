@@ -35,4 +35,3 @@ def test_load_config_rejects_duplicate_labels(tmp_path: Path) -> None:
 
     with pytest.raises(ValidationError, match="canonical order"):
         load_config(invalid_path)
-

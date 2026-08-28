@@ -149,4 +149,3 @@ def load_config(path: Path = CONFIG_PATH) -> ExperimentConfig:
     """Read, validate and cache a YAML experiment configuration."""
     raw_config = yaml.safe_load(path.read_text(encoding="utf-8"))
     return ExperimentConfig.model_validate(raw_config)
-

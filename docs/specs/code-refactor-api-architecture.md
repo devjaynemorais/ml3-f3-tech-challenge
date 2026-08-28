@@ -416,4 +416,3 @@ do Git.
 Antes de considerar a spec pronta para implementação, executar revisão de
 placeholders, contradições, interfaces, paths, cobertura de requisitos e
 aderência a DRY, SOLID e KISS.
-
