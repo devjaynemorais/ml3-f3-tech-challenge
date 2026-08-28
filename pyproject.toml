@@ -18,6 +18,9 @@ prometheus-client = ">=0.20.0"
 joblib = ">=1.4.0"
 skl2onnx = ">=1.16.0"
 onnxruntime = ">=1.17.0"
+nltk = ">=3.10,<4"
+spacy = ">=3.8,<3.9"
+Unidecode = ">=1.4,<2"
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=8.1.0"
