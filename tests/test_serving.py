@@ -1,60 +1,125 @@
+import logging
+
 import pytest
 from fastapi.testclient import TestClient
 
 import src.serving.api as api_module
+from src.utils.config_loader import CANONICAL_LABELS
 
 
 class _FakePredictor:
     backend = "fake"
 
     def predict(self, text: str) -> tuple[str, dict[str, float]]:
-        return "urgente", {"normal": 0.05, "atencao": 0.15, "urgente": 0.8}
+        scores = {label: 0.05 for label in CANONICAL_LABELS}
+        scores[CANONICAL_LABELS[0]] = 0.8
+        return CANONICAL_LABELS[0], scores
 
 
-def test_root_endpoint() -> None:
-    with TestClient(api_module.app) as client:
-        resp = client.get("/")
-        assert resp.status_code == 200
-        assert resp.json()["service"] == "Triage Classifier API"
+class _FailingPredictor:
+    backend = "fake"
+
+    def predict(self, text: str) -> tuple[str, dict[str, float]]:
+        raise RuntimeError("inference failed")
 
 
-def test_health_degraded_sem_modelo_treinado(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _raise() -> None:
-        raise FileNotFoundError("modelo não encontrado")
-
-    monkeypatch.setattr(api_module, "load_predictor", _raise)
-    with TestClient(api_module.app) as client:
-        resp = client.get("/health")
-        assert resp.json() == {"status": "degraded", "model_loaded": False}
+def _missing_predictor():
+    raise FileNotFoundError("model not found")
 
 
-def test_predict_endpoint_com_modelo_carregado(
-    monkeypatch: pytest.MonkeyPatch,
+def test_root_endpoint_reports_medical_classifier_name_and_version() -> None:
+    with TestClient(api_module.create_app(lambda: _FakePredictor())) as client:
+        response = client.get("/")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "service": "Medical Text Classifier API",
+        "version": "0.1.0",
+    }
+
+
+def test_health_reports_loaded_backend() -> None:
+    with TestClient(api_module.create_app(lambda: _FakePredictor())) as client:
+        response = client.get("/health")
+
+    assert response.json() == {
+        "status": "ok",
+        "model_loaded": True,
+        "backend": "fake",
+    }
+
+
+def test_health_is_degraded_when_loading_fails() -> None:
+    with TestClient(api_module.create_app(_missing_predictor)) as client:
+        response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "degraded", "model_loaded": False}
+
+
+def test_app_instances_keep_predictors_isolated() -> None:
+    loaded_app = api_module.create_app(lambda: _FakePredictor())
+    degraded_app = api_module.create_app(_missing_predictor)
+
+    with TestClient(loaded_app) as loaded, TestClient(degraded_app) as degraded:
+        assert loaded.get("/health").json()["status"] == "ok"
+        assert degraded.get("/health").json()["status"] == "degraded"
+
+
+def test_predict_returns_five_canonical_scores() -> None:
+    with TestClient(api_module.create_app(lambda: _FakePredictor())) as client:
+        response = client.post("/predict", json={"text": "neutral abstract"})
+
+    assert response.status_code == 200
+    assert response.json()["label"] == CANONICAL_LABELS[0]
+    assert response.json()["backend"] == "fake"
+    assert list(response.json()["scores"]) == CANONICAL_LABELS
+    assert sum(response.json()["scores"].values()) == pytest.approx(1.0)
+
+
+@pytest.mark.parametrize("text", ["", "   "])
+def test_predict_rejects_empty_or_blank_text(text: str) -> None:
+    with TestClient(api_module.create_app(lambda: _FakePredictor())) as client:
+        response = client.post("/predict", json={"text": text})
+
+    assert response.status_code == 422
+
+
+def test_predict_returns_503_without_predictor() -> None:
+    with TestClient(api_module.create_app(_missing_predictor)) as client:
+        response = client.post("/predict", json={"text": "neutral abstract"})
+
+    assert response.status_code == 503
+
+
+def test_inference_failure_returns_500_without_logging_text(
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    monkeypatch.setattr(api_module, "load_predictor", lambda: _FakePredictor())
-    with TestClient(api_module.app) as client:
-        resp = client.post("/predict", json={"text": "dor torácica intensa"})
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["label"] == "urgente"
-        assert body["backend"] == "fake"
-        assert pytest.approx(sum(body["scores"].values()), rel=1e-6) == 1.0
+    secret_text = "private-text-that-must-not-be-logged"
+    caplog.set_level(logging.ERROR)
+
+    with TestClient(api_module.create_app(lambda: _FailingPredictor())) as client:
+        response = client.post("/predict", json={"text": secret_text})
+
+    assert response.status_code == 500
+    assert secret_text not in caplog.text
+    assert "inference failed" in caplog.text
 
 
-def test_predict_endpoint_503_sem_modelo(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _raise() -> None:
-        raise FileNotFoundError("modelo não encontrado")
+def test_metrics_endpoint_exposes_preserved_prometheus_names() -> None:
+    with TestClient(api_module.create_app(lambda: _FakePredictor())) as client:
+        client.get("/")
+        response = client.get("/metrics")
 
-    monkeypatch.setattr(api_module, "load_predictor", _raise)
-    with TestClient(api_module.app) as client:
-        resp = client.post("/predict", json={"text": "dor torácica intensa"})
-        assert resp.status_code == 503
+    assert response.status_code == 200
+    assert b"http_requests_total" in response.content
+    assert b"http_request_duration_seconds" in response.content
+    assert b"triage_predictions_total" in response.content
 
 
-def test_metrics_endpoint_expoe_formato_prometheus() -> None:
-    with TestClient(api_module.app) as client:
-        client.get("/")  # gera ao menos uma amostra antes de ler /metrics
-        resp = client.get("/metrics")
-        assert resp.status_code == 200
-        assert b"http_requests_total" in resp.content
-        assert b"http_request_duration_seconds" in resp.content
+def test_swagger_docs_are_available() -> None:
+    with TestClient(api_module.create_app(lambda: _FakePredictor())) as client:
+        response = client.get("/docs")
+
+    assert response.status_code == 200
+    assert "swagger-ui" in response.text.lower()

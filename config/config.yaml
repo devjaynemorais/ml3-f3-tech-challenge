@@ -1,5 +1,5 @@
 project:
-  name: medical_text_classifier
+  name: Medical Text Classifier API
   version: "0.1.0"
 
 data:
@@ -75,4 +75,3 @@ artifacts:
   classes_file: classes.json
   metrics_path: metrics
   metrics_file: eval_metrics.json
-
