@@ -1,108 +1,136 @@
-"""Carrega o classificador de triagem no backend configurado (sklearn ou ONNX)."""
+"""Load validated sklearn or ONNX medical-text predictors."""
 
 from __future__ import annotations
 
 import json
-import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 import joblib
 import numpy as np
+from scipy import sparse
+from sklearn.pipeline import Pipeline
 
 from src.config.settings import settings
-from src.utils.config_loader import load_config
+from src.models.artifact_contract import validate_artifact_classes
+from src.models.registry import load_pipeline
+from src.utils.config_loader import ExperimentConfig, load_config
 
 if TYPE_CHECKING:
     from onnxruntime import InferenceSession
-    from sklearn.feature_extraction.text import TfidfVectorizer
-    from sklearn.pipeline import Pipeline
-
-logger = logging.getLogger(__name__)
 
 
 class TriagePredictor(Protocol):
-    """Interface comum entre o backend sklearn e o backend ONNX."""
+    """Common contract for sklearn and ONNX inference backends."""
 
     backend: str
 
     def predict(self, text: str) -> tuple[str, dict[str, float]]:
-        """Retorna (rótulo previsto, probabilidades por classe)."""
+        """Return predicted label and probability per canonical class."""
         ...
 
 
+def _ordered_scores(
+    probabilities: np.ndarray,
+    probability_classes: list[str],
+    expected_classes: list[str],
+) -> dict[str, float]:
+    """Map probability output to canonical response order."""
+    by_class = dict(zip(probability_classes, probabilities.tolist(), strict=True))
+    return {label: float(by_class[label]) for label in expected_classes}
+
+
+def _label_from_scores(scores: dict[str, float]) -> str:
+    """Return the highest-probability class."""
+    return max(scores, key=scores.__getitem__)
+
+
 class SklearnPredictor:
-    """Backend de inferência usando o Pipeline scikit-learn completo."""
+    """Inference backend using the complete persisted sklearn Pipeline."""
 
     backend = "sklearn"
 
-    def __init__(self, pipeline: Pipeline) -> None:
+    def __init__(self, pipeline: Pipeline, expected_classes: list[str]) -> None:
         self._pipeline = pipeline
-        self._classes = list(pipeline.classes_)
+        self._expected_classes = expected_classes
+        self._probability_classes = validate_artifact_classes(
+            list(pipeline.classes_), expected_classes
+        )
 
     def predict(self, text: str) -> tuple[str, dict[str, float]]:
-        """Retorna (rótulo previsto, probabilidades por classe)."""
-        proba = self._pipeline.predict_proba([text])[0]
-        scores = dict(zip(self._classes, proba.tolist(), strict=True))
-        label = self._classes[int(np.argmax(proba))]
-        return label, scores
+        """Predict with sklearn and return canonical ordered scores."""
+        probabilities = np.asarray(self._pipeline.predict_proba([text])[0])
+        scores = _ordered_scores(
+            probabilities, self._probability_classes, self._expected_classes
+        )
+        return _label_from_scores(scores), scores
 
 
 class OnnxPredictor:
-    """Backend de inferência com TF-IDF (sklearn) + classificador via ONNX Runtime."""
+    """Inference backend using a sklearn feature prefix and ONNX classifier."""
 
     backend = "onnx"
 
     def __init__(
-        self, vectorizer: TfidfVectorizer, session: InferenceSession, classes: list[str]
+        self,
+        feature_pipeline: Pipeline,
+        session: InferenceSession,
+        probability_classes: list[str],
+        expected_classes: list[str],
     ) -> None:
-        self._vectorizer = vectorizer
+        self._feature_pipeline = feature_pipeline
         self._session = session
         self._input_name = session.get_inputs()[0].name
-        self._classes = classes
+        self._expected_classes = expected_classes
+        self._probability_classes = validate_artifact_classes(
+            probability_classes, expected_classes
+        )
 
     def predict(self, text: str) -> tuple[str, dict[str, float]]:
-        """Retorna (rótulo previsto, probabilidades por classe)."""
-        vector = self._vectorizer.transform([text]).toarray().astype(np.float32)
-        _label_out, proba_out = self._session.run(None, {self._input_name: vector})
-        proba = np.asarray(proba_out[0])
-        scores = dict(zip(self._classes, proba.tolist(), strict=True))
-        label = self._classes[int(np.argmax(proba))]
-        return label, scores
+        """Transform text once and infer canonical scores with ONNX Runtime."""
+        features = self._feature_pipeline.transform([text])
+        dense = features.toarray() if sparse.issparse(features) else features
+        outputs = self._session.run(
+            None, {self._input_name: np.asarray(dense, dtype=np.float32)}
+        )
+        probabilities = np.asarray(outputs[-1][0])
+        scores = _ordered_scores(
+            probabilities, self._probability_classes, self._expected_classes
+        )
+        return _label_from_scores(scores), scores
+
+
+def _load_sklearn_predictor(config: ExperimentConfig) -> SklearnPredictor:
+    """Load and validate the configured sklearn pipeline."""
+    pipeline = load_pipeline(
+        Path(settings.model_artifacts_path), config.artifacts.pipeline_file
+    )
+    return SklearnPredictor(pipeline, config.data.labels)
+
+
+def _load_onnx_predictor(config: ExperimentConfig) -> OnnxPredictor:
+    """Load and validate the configured ONNX artifact set."""
+    import onnxruntime as ort
+
+    path = Path(settings.model_onnx_path)
+    feature_pipeline = joblib.load(path / config.artifacts.feature_pipeline_file)
+    if not isinstance(feature_pipeline, Pipeline):
+        raise TypeError("ONNX feature artifact is not an sklearn Pipeline")
+    classes = json.loads(
+        (path / config.artifacts.classes_file).read_text(encoding="utf-8")
+    )
+    session = ort.InferenceSession(
+        str(path / config.artifacts.onnx_file), providers=["CPUExecutionProvider"]
+    )
+    return OnnxPredictor(feature_pipeline, session, classes, config.data.labels)
 
 
 def load_predictor(backend: str | None = None) -> TriagePredictor:
-    """Instancia o predictor no backend pedido (ou `settings.model_backend`).
-
-    Os nomes de arquivo dos artefatos (`pipeline_file`, `onnx_file`, ...) vêm do
-    `config.yaml` — é o mesmo config que `src.training.trainer` e
-    `src.optimization.export_onnx` usam para *salvar* esses artefatos. Já os
-    diretórios onde procurar (`settings.model_artifacts_path` /
-    `settings.model_onnx_path`) são configuráveis por ambiente, para permitir
-    apontar o serving para um volume/local diferente do treino sem editar o
-    config.yaml.
-    """
-    cfg = load_config()
-    backend = backend or settings.model_backend
-
-    if backend == "sklearn":
-        from src.models.registry import load_pipeline
-
-        pipeline = load_pipeline(
-            Path(settings.model_artifacts_path), cfg["artifacts"]["pipeline_file"]
-        )
-        return SklearnPredictor(pipeline)
-
-    if backend == "onnx":
-        import onnxruntime as ort
-
-        onnx_path = Path(settings.model_onnx_path)
-        onnx_file = onnx_path / cfg["artifacts"]["onnx_file"]
-        vectorizer = joblib.load(onnx_path / "vectorizer.joblib")
-        classes = json.loads((onnx_path / "classes.json").read_text(encoding="utf-8"))
-        session = ort.InferenceSession(
-            str(onnx_file), providers=["CPUExecutionProvider"]
-        )
-        return OnnxPredictor(vectorizer, session, classes)
-
-    raise ValueError(f"model_backend desconhecido: {backend!r}")
+    """Load the selected runtime backend and validate its artifact classes."""
+    config = load_config()
+    selected_backend = backend or settings.model_backend
+    if selected_backend == "sklearn":
+        return _load_sklearn_predictor(config)
+    if selected_backend == "onnx":
+        return _load_onnx_predictor(config)
+    raise ValueError(f"unknown model backend: {selected_backend!r}")
