@@ -1,0 +1,17 @@
+FROM apache/airflow:2.9.3-python3.11
+
+ARG POETRY_VERSION=1.8.3
+ARG SPACY_MODEL_URL=https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
+
+ENV NLTK_DATA=/home/airflow/nltk_data \
+    POETRY_NO_INTERACTION=1 \
+    POETRY_VIRTUALENVS_CREATE=false
+
+COPY pyproject.toml poetry.lock /tmp/project/
+
+RUN pip install --no-cache-dir "poetry==${POETRY_VERSION}" \
+    && cd /tmp/project \
+    && poetry install --only main --no-root \
+    && python -m nltk.downloader -d "${NLTK_DATA}" stopwords \
+    && pip install --no-cache-dir "${SPACY_MODEL_URL}" \
+    && rm -rf /tmp/project /home/airflow/.cache

@@ -1,13 +1,14 @@
-# Orquestração básica de treino/retreino via Airflow (LocalExecutor + Postgres).
+# OrquestraÃ§Ã£o bÃ¡sica de treino/retreino via Airflow (LocalExecutor + Postgres).
 # Compose separado do principal (docker-compose.yml) para manter a stack de
-# monitoramento enxuta — sobe sob demanda com `make airflow-up`.
+# monitoramento enxuta â€” sobe sob demanda com `make airflow-up`.
 #
-# _PIP_ADDITIONAL_REQUIREMENTS instala as libs de ML direto na imagem oficial
-# do Airflow no start do container. É a forma mais simples de rodar as DAGs
-# deste projeto sem manter uma imagem Airflow customizada — adequado para o
-# escopo do desafio (dev local); em produção, construa uma imagem própria.
+# A imagem customizada instala dependÃªncias e recursos NLP durante o build,
+# evitando instalaÃ§Ãµes lentas e nÃ£o reproduzÃ­veis no startup dos serviÃ§os.
 x-airflow-common: &airflow-common
-  image: apache/airflow:2.9.3-python3.11
+  build:
+    context: .
+    dockerfile: Dockerfile.airflow
+  image: ml3-f3-tech-challenge-airflow:local
   environment:
     &airflow-common-env
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
@@ -15,7 +16,6 @@ x-airflow-common: &airflow-common
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
     PYTHONPATH: /opt/airflow
-    _PIP_ADDITIONAL_REQUIREMENTS: "scikit-learn>=1.4.0 pandas>=2.2.0 pydantic-settings>=2.2.0 pyyaml>=6.0.1 joblib>=1.4.0 skl2onnx>=1.16.0 onnxruntime>=1.17.0"
   volumes:
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow/logs:/opt/airflow/logs
