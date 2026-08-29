@@ -129,6 +129,9 @@ def write_metrics(metrics: dict, path: Path) -> None:
 def _log_split_metrics(split_name: str, split_metrics: dict) -> None:
     """Log one split's tracked summary metrics to the active MLflow run."""
     mlflow.log_metric(f"{split_name}_accuracy", split_metrics["accuracy"])
+    mlflow.log_metric(
+        f"{split_name}_macro_precision", split_metrics["macro_avg"]["precision"]
+    )
     mlflow.log_metric(f"{split_name}_macro_f1", split_metrics["macro_avg"]["f1"])
     mlflow.log_metric(f"{split_name}_weighted_f1", split_metrics["weighted_avg"]["f1"])
     mlflow.log_metric(

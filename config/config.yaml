@@ -93,6 +93,8 @@ artifacts:
 registry:
   model_name: medical_text_classifier
   # Metrica de VALIDACAO (nao teste) usada para escolher o run a promover.
-  metric: validation_macro_f1
+  # macro_f1 e macro_precision empatam entre os top runs (< 0.1pp); precision
+  # foi o criterio de desempate escolhido.
+  metric: validation_macro_precision
   ascending: false
   stage: Production
