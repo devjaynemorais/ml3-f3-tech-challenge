@@ -18,12 +18,15 @@ env:
 	$(POETRY) install --with dev
 
 SPACY_MODEL_URL := https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
+# scispaCy — vetores biomedicos usados pela Strategy features.type=embeddings
+SCISPACY_MODEL_URL := https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.5.4/en_core_sci_md-0.5.4.tar.gz
 
 install: env nlp-resources
 
 nlp-resources:
 	$(POETRY) run python -m nltk.downloader stopwords
 	$(POETRY) run python -m pip install --no-cache-dir $(SPACY_MODEL_URL)
+	$(POETRY) run python -m pip install --no-cache-dir $(SCISPACY_MODEL_URL)
 
 # ─── Qualidade de Código ──────────────────────────────────────────────────────
 

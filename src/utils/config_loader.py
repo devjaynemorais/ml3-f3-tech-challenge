@@ -70,12 +70,20 @@ class PreprocessingConfig(BaseModel):
     preserve_numbers: bool
 
 
-class FeatureConfig(BaseModel):
-    """TF-IDF feature parameters."""
+class EmbeddingsConfig(BaseModel):
+    """Pretrained spaCy model used for averaged word-vector features."""
 
+    spacy_model: str
+
+
+class FeatureConfig(BaseModel):
+    """Feature Strategy selection: TF-IDF parameters or word embeddings."""
+
+    type: Literal["tfidf", "embeddings"]
     max_features: int = Field(gt=0)
     ngram_range: tuple[int, int]
     min_df: int = Field(gt=0)
+    embeddings: EmbeddingsConfig
 
 
 class LogisticRegressionConfig(BaseModel):
@@ -108,13 +116,38 @@ class GradientBoostingConfig(BaseModel):
     random_state: int
 
 
+class LinearSvmConfig(BaseModel):
+    """Calibrated Linear SVM parameters."""
+
+    C: float = Field(gt=0)
+    max_iter: int = Field(gt=0)
+    class_weight: str | None
+    random_state: int
+    calibration_cv: int = Field(gt=1)
+
+
+class ComplementNbConfig(BaseModel):
+    """Complement Naive Bayes parameters."""
+
+    alpha: float = Field(gt=0)
+    norm: bool
+
+
 class ModelConfig(BaseModel):
     """Active model Strategy and parameters for every supported option."""
 
-    type: Literal["logistic_regression", "random_forest", "gradient_boosting"]
+    type: Literal[
+        "logistic_regression",
+        "random_forest",
+        "gradient_boosting",
+        "linear_svm",
+        "complement_nb",
+    ]
     logistic_regression: LogisticRegressionConfig
     random_forest: RandomForestConfig
     gradient_boosting: GradientBoostingConfig
+    linear_svm: LinearSvmConfig
+    complement_nb: ComplementNbConfig
 
 
 class ArtifactConfig(BaseModel):

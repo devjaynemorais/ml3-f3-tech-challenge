@@ -25,8 +25,11 @@ O serviço foi mantido real-time porque o objetivo técnico é disponibilizar um
 classificação por requisição com baixa latência. A arquitetura combina:
 
 - preprocessing configurável por Strategy e Factory;
-- TF-IDF com Regressão Logística por padrão;
-- Random Forest e Gradient Boosting selecionáveis no YAML;
+- features por TF-IDF (padrão) ou embeddings biomédicos pré-treinados (spaCy
+  `en_core_sci_md`), selecionável no YAML;
+- classificador por Complement Naive Bayes (padrão — melhor F1-macro entre os
+  comparados), Regressão Logística, Linear SVM calibrado, Random Forest ou
+  Gradient Boosting, todos selecionáveis no YAML;
 - pipeline sklearn persistido e classificador exportável para ONNX Runtime;
 - API FastAPI com modo degradado quando não há artefato válido;
 - Prometheus e Grafana para volume, erros, latência e distribuição de classes;
@@ -105,9 +108,11 @@ make benchmark-latency
 make api
 ```
 
-`make install` instala as dependências, as stopwords NLTK e o modelo spaCy
-`en_core_web_sm 3.8.0`. No Windows, quando `make` não estiver disponível, use o
-interpretador da `.venv` com os módulos indicados nos targets do Makefile.
+`make install` instala as dependências, as stopwords NLTK, o modelo spaCy
+`en_core_web_sm 3.8.0` (preprocessing) e o `en_core_sci_md 0.5.4` do scispaCy
+(embeddings biomédicos, usado só quando `features.type: embeddings`). No
+Windows, quando `make` não estiver disponível, use o interpretador da `.venv`
+com os módulos indicados nos targets do Makefile.
 
 Depois de iniciar a API, abra `http://localhost:8000/docs`.
 

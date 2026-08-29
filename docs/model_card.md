@@ -36,18 +36,34 @@ O transformer persistido aplica, na ordem configurada:
 3. tokenização e lematização com `en_core_web_sm 3.8.0`;
 4. remoção de stopwords NLTK e tokens de um caractere.
 
-Em seguida, TF-IDF usa até 5.000 features, n-gramas de 1 a 2 e `min_df=2`. O
-mesmo pipeline de preprocessing é reutilizado na inferência, evitando training-
-serving skew.
+Em seguida, `features.type` seleciona a representação:
+
+- `tfidf` (padrão): até 5.000 features, n-gramas de 1 a 2, `min_df=2`;
+- `embeddings`: vetor médio de palavras do `en_core_sci_md` (scispaCy,
+  treinado em texto biomédico) — captura similaridade semântica
+  (ex.: "carcinoma" ~ "tumor") que o TF-IDF não vê, à custa de ~40-50% mais
+  latência por requisição.
+
+O mesmo pipeline de preprocessing é reutilizado na inferência, evitando
+training-serving skew.
 
 ## Modelos
 
-- padrão: Regressão Logística balanceada;
+- padrão: Complement Naive Bayes (melhor F1-macro e accuracy entre os
+  comparados; requer features não-negativas, só combina com `tfidf`);
+- alternativa: Regressão Logística balanceada (melhor recall de classes
+  minoritárias quando combinada com `embeddings`);
+- alternativa: Linear SVM calibrado (Platt scaling via `CalibratedClassifierCV`
+  — no experimento comparativo teve F1-macro pior que os dois acima; a
+  calibração por CV parece distorcer o efeito do `class_weight=balanced`);
 - alternativa: Random Forest balanceada;
 - alternativa: Gradient Boosting com seleção chi-quadrado e matriz densa.
 
 Uma única Strategy é treinada por execução, escolhida em `config/config.yaml`.
-O sistema não escolhe automaticamente o melhor modelo.
+O sistema não escolhe automaticamente o melhor modelo — a comparação entre
+Strategies é feita manualmente via `make train` + `make evaluate` para cada
+`model.type`, com os resultados registrados no MLflow (`make mlflow`) para
+comparar lado a lado antes de fixar a escolha final em `config.yaml`.
 
 ## Avaliação
 
@@ -73,6 +89,13 @@ testada com `rtol=1e-5` e `atol=1e-6`.
 
 ## Limitações e riscos
 
+- `general pathological conditions` concentra a maior parte dos erros do
+  modelo, espalhados quase igualmente entre as outras 4 classes (sem par de
+  confusão dominante). Auditoria manual de amostras mal classificadas sugere
+  que boa parte é rótulo ambíguo/inconsistente na fonte — abstracts com
+  conteúdo claramente cardiovascular, digestivo ou neurológico foram
+  rotulados como "geral" no corpus original. Isso impõe um teto de recall
+  nessa classe que técnicas de modelagem não resolvem sozinhas.
 - As categorias são amplas e não representam diagnósticos específicos.
 - Abstracts publicados diferem de notas clínicas, laudos e mensagens reais.
 - Vocabulário, estilo, prevalência e idioma podem mudar entre fontes.

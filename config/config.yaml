@@ -39,12 +39,17 @@ preprocessing:
   preserve_numbers: true
 
 features:
+  type: tfidf  # tfidf | embeddings
   max_features: 5000
   ngram_range: [1, 2]
   min_df: 2
+  embeddings:
+    # scispaCy — vetores treinados em texto biomedico, capturam similaridade
+    # semantica (ex.: "carcinoma" ~ "tumor") que o TF-IDF nao ve.
+    spacy_model: en_core_sci_md
 
 model:
-  type: logistic_regression
+  type: complement_nb
   logistic_regression:
     C: 1.0
     max_iter: 1000
@@ -63,6 +68,15 @@ model:
     max_depth: 3
     selection_k: 800
     random_state: 42
+  linear_svm:
+    C: 1.0
+    max_iter: 5000
+    class_weight: balanced
+    random_state: 42
+    calibration_cv: 3
+  complement_nb:
+    alpha: 1.0
+    norm: false
 
 artifacts:
   schema_version: 2

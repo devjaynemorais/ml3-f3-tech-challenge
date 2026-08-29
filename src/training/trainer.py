@@ -31,6 +31,7 @@ def build_metadata(config: ExperimentConfig, sample_count: int) -> dict:
     return {
         "schema_version": config.artifacts.schema_version,
         "model_type": config.model.type,
+        "feature_type": config.features.type,
         "model_parameters": _active_model_parameters(config),
         "preprocessing_strategies": config.preprocessing.steps,
         "classes": config.data.labels,
@@ -60,13 +61,14 @@ def log_run_to_mlflow(
         # MLflow prints a run-URL summary with emoji; Windows consoles default
         # to cp1252, which raises UnicodeEncodeError on that summary.
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    run_name = f"{metadata['model_type']}-tfidf"
+    run_name = f"{metadata['model_type']}-{metadata['feature_type']}"
     try:
         mlflow.set_tracking_uri(tracking_uri)
         mlflow.set_experiment(config.project.name)
         with mlflow.start_run(run_name=run_name) as run:
             mlflow.log_params(metadata["model_parameters"])
             mlflow.log_param("model_type", metadata["model_type"])
+            mlflow.log_param("feature_type", metadata["feature_type"])
             mlflow.log_param("n_train_samples", metadata["n_train_samples"])
             mlflow.sklearn.log_model(pipeline, artifact_path="model")
             return run.info.run_id

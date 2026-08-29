@@ -23,7 +23,7 @@ def test_load_config_returns_typed_medical_corpus_config() -> None:
     assert config.data.test_file == "medical_tc_test.csv"
     assert config.data.labels_file == "medical_tc_labels.csv"
     assert config.split.validation_size == 0.1
-    assert config.model.type == "logistic_regression"
+    assert config.model.type == "complement_nb"
 
 
 def test_load_config_rejects_duplicate_labels(tmp_path: Path) -> None:
