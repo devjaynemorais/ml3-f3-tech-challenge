@@ -1,27 +1,69 @@
-"""Modelos Pydantic de request/response da API de triagem."""
+"""Pydantic request and response contracts for the public API."""
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from enum import StrEnum
+from typing import Literal
+
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+
+class MedicalCondition(StrEnum):
+    """Canonical Medical Abstracts target classes."""
+
+    NEOPLASMS = "neoplasms"
+    DIGESTIVE = "digestive system diseases"
+    NERVOUS = "nervous system diseases"
+    CARDIOVASCULAR = "cardiovascular diseases"
+    GENERAL = "general pathological conditions"
 
 
 class TriageRequest(BaseModel):
-    """Corpo da requisição de classificação de um laudo médico."""
+    """One medical abstract to classify for prioritization support."""
 
     text: str = Field(
-        ...,
         min_length=1,
-        description="Texto do laudo/relato clínico a ser classificado.",
-        examples=[
-            "Paciente relata dor torácica intensa e súbita, "
-            "irradiando para o braço esquerdo."
-        ],
+        description="English medical abstract to classify.",
+        examples=["The abstract describes a cardiovascular condition."],
     )
+
+    @field_validator("text")
+    @classmethod
+    def reject_blank_text(cls, text: str) -> str:
+        """Reject whitespace-only values and trim request boundaries."""
+        stripped = text.strip()
+        if not stripped:
+            raise ValueError("text must not be blank")
+        return stripped
 
 
 class TriageResponse(BaseModel):
-    """Resposta da classificação de urgência."""
+    """Predicted class, canonical probabilities and inference backend."""
 
-    label: str = Field(description="Classe prevista: normal, atencao ou urgente.")
-    scores: dict[str, float] = Field(description="Probabilidade por classe.")
-    backend: str = Field(description="Backend de inferência usado: sklearn ou onnx.")
+    label: MedicalCondition
+    scores: dict[MedicalCondition, float]
+    backend: str
+
+    @model_validator(mode="after")
+    def validate_scores(self) -> TriageResponse:
+        """Require every canonical class and normalized probabilities."""
+        if set(self.scores) != set(MedicalCondition):
+            raise ValueError("scores must contain every canonical class")
+        if abs(sum(self.scores.values()) - 1.0) > 1e-5:
+            raise ValueError("scores must sum to 1")
+        return self
+
+
+class HealthResponse(BaseModel):
+    """Model loading status exposed by the health check."""
+
+    status: Literal["ok", "degraded"]
+    model_loaded: bool
+    backend: str | None = None
+
+
+class ServiceMetadata(BaseModel):
+    """Stable service metadata returned by the root endpoint."""
+
+    service: str
+    version: str

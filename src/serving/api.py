@@ -1,91 +1,59 @@
-"""API FastAPI de triagem automática de laudos médicos.
-
-Endpoints:
-  - GET  /         → metadados do serviço
-  - GET  /health   → estado de carregamento do modelo
-  - POST /predict  → classifica um laudo em normal / atencao / urgente
-  - GET  /metrics  → métricas Prometheus (contagem de requisições e latência)
-"""
+"""FastAPI application factory and stable ``src.serving.api:app`` entrypoint."""
 
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Callable
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import Response
+from fastapi import FastAPI
 
-from src.serving.metrics import PREDICTION_COUNT, PrometheusMiddleware, metrics_response
+from src.serving.metrics import PrometheusMiddleware
 from src.serving.model_loader import TriagePredictor, load_predictor
-from src.serving.schemas import TriageRequest, TriageResponse
+from src.serving.routes import router
+from src.utils.config_loader import load_config
 
 logger = logging.getLogger(__name__)
-
-state: dict[str, TriagePredictor | None] = {"predictor": None}
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Carrega o modelo de triagem uma única vez no startup da API."""
-    state["predictor"] = None
-    try:
-        state["predictor"] = load_predictor()
-        logger.info(
-            "Modelo de triagem carregado (backend=%s)", state["predictor"].backend
-        )
-    except Exception:  # noqa: BLE001 — API sobe em modo degradado
-        logger.exception("Falha ao carregar o modelo; /health reportará degradado.")
-    yield
+PredictorLoader = Callable[[], TriagePredictor]
 
 
-app = FastAPI(
-    title="Triage Classifier API",
-    description="Classificação de urgência de laudos médicos "
-    "(normal / atencao / urgente).",
-    version="0.1.0",
-    lifespan=lifespan,
-)
-app.add_middleware(PrometheusMiddleware)
+def _lifespan(
+    predictor_loader: PredictorLoader,
+) -> Callable[[FastAPI], AbstractAsyncContextManager[None]]:
+    """Build a lifespan context bound to one predictor loader."""
+
+    @asynccontextmanager
+    async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+        application.state.predictor = None
+        try:
+            application.state.predictor = predictor_loader()
+            logger.info(
+                "Medical classifier loaded (backend=%s)",
+                application.state.predictor.backend,
+            )
+        except Exception:  # noqa: BLE001 - startup remains intentionally degraded
+            logger.exception("Model loading failed; API started in degraded mode")
+        yield
+        application.state.predictor = None
+
+    return lifespan
 
 
-def _get_predictor() -> TriagePredictor:
-    """Retorna o predictor carregado ou 503 se o modelo ainda não existe."""
-    predictor = state["predictor"]
-    if predictor is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Modelo não carregado. Rode `make train` (e `make export-onnx` "
-            "se model_backend=onnx) antes de usar a API.",
-        )
-    return predictor
+def create_app(predictor_loader: PredictorLoader = load_predictor) -> FastAPI:
+    """Compose a FastAPI instance with isolated state, routes and middleware."""
+    project = load_config().project
+    application = FastAPI(
+        title=project.name,
+        description=(
+            "Classifies public English medical abstracts as prioritization support; "
+            "it is not a diagnostic system."
+        ),
+        version=project.version,
+        lifespan=_lifespan(predictor_loader),
+    )
+    application.add_middleware(PrometheusMiddleware)
+    application.include_router(router)
+    return application
 
 
-@app.get("/")
-def root() -> dict:
-    """Metadados do serviço."""
-    return {"service": "Triage Classifier API", "version": "0.1.0"}
-
-
-@app.get("/health")
-def health() -> dict:
-    """Estado de carregamento do modelo."""
-    predictor = state["predictor"]
-    if predictor is None:
-        return {"status": "degraded", "model_loaded": False}
-    return {"status": "ok", "model_loaded": True, "backend": predictor.backend}
-
-
-@app.post("/predict", response_model=TriageResponse)
-def predict(request: TriageRequest) -> dict:
-    """Classifica o texto do laudo em normal / atencao / urgente."""
-    predictor = _get_predictor()
-    label, scores = predictor.predict(request.text)
-    PREDICTION_COUNT.labels(predicted_label=label).inc()
-    return {"label": label, "scores": scores, "backend": predictor.backend}
-
-
-@app.get("/metrics")
-def metrics() -> Response:
-    """Expõe as métricas no formato de texto do Prometheus."""
-    return metrics_response()
+app = create_app()

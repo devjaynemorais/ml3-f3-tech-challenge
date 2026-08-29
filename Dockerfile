@@ -14,6 +14,10 @@ COPY pyproject.toml poetry.lock* ./
 
 RUN poetry install --only main --no-root && rm -rf "${POETRY_CACHE_DIR}"
 
+ARG SPACY_MODEL_URL=https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
+RUN .venv/bin/python -m nltk.downloader -d /app/.venv/nltk_data stopwords \
+    && .venv/bin/python -m pip install --no-cache-dir "${SPACY_MODEL_URL}"
+
 
 # Stage 2: train — jobs de treino/avaliação/otimização (usado pelo Airflow e
 # pelo `docker compose run --rm train`)
@@ -27,6 +31,7 @@ COPY scripts/ scripts/
 COPY config/ config/
 
 ENV PATH="/app/.venv/bin:$PATH" \
+    NLTK_DATA=/app/.venv/nltk_data \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
@@ -44,6 +49,7 @@ COPY src/ src/
 COPY config/ config/
 
 ENV PATH="/app/.venv/bin:$PATH" \
+    NLTK_DATA=/app/.venv/nltk_data \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 

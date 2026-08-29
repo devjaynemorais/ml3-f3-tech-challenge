@@ -7,7 +7,7 @@ package-mode = false
 
 [tool.poetry.dependencies]
 python = "^3.11"
-scikit-learn = ">=1.4.0"
+scikit-learn = ">=1.4.0,<1.8"
 pandas = ">=2.2.0"
 numpy = ">=1.26.0"
 pydantic-settings = ">=2.2.0"
@@ -18,6 +18,9 @@ prometheus-client = ">=0.20.0"
 joblib = ">=1.4.0"
 skl2onnx = ">=1.16.0"
 onnxruntime = ">=1.17.0"
+nltk = ">=3.10,<4"
+spacy = ">=3.8,<3.9"
+Unidecode = ">=1.4,<2"
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=8.1.0"
@@ -69,6 +72,10 @@ no_strict_optional = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v --cov=src --cov-report=term-missing"
+filterwarnings = [
+    "ignore:Importing 'parser.split_arg_string'.*:DeprecationWarning",
+    "ignore:Using `httpx` with `starlette.testclient`.*:starlette.exceptions.StarletteDeprecationWarning",
+]
 
 [tool.coverage.report]
 exclude_lines = [

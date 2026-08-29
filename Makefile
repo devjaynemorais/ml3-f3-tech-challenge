@@ -1,4 +1,4 @@
-.PHONY: env install lint format test test-cov \
+.PHONY: env install nlp-resources lint format test test-cov \
         dataset train evaluate export-onnx benchmark-latency pipeline \
         api compose-build compose-up compose-down \
         airflow-up airflow-down
@@ -17,7 +17,13 @@ env:
 	python -m pip install poetry==1.8.3 --quiet
 	$(POETRY) install --with dev
 
-install: env
+SPACY_MODEL_URL := https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
+
+install: env nlp-resources
+
+nlp-resources:
+	$(POETRY) run python -m nltk.downloader stopwords
+	$(POETRY) run python -m pip install --no-cache-dir $(SPACY_MODEL_URL)
 
 # ─── Qualidade de Código ──────────────────────────────────────────────────────
 
@@ -39,10 +45,9 @@ test-cov:
 
 # ─── Pipeline de ML (local, sem Docker/Airflow) ────────────────────────────────
 
-# Gera o dataset sintético de laudos em data/raw/ (troque por um dataset real
-# do Kaggle/MIMIC-III conforme o README quando disponível)
+# Valida o Medical Abstracts TC Corpus e persiste treino, validação e teste.
 dataset:
-	$(POETRY) run python -m scripts.generate_synthetic_dataset
+	$(POETRY) run python -m src.data.make_dataset
 
 train:
 	$(POETRY) run python -m src.training.trainer

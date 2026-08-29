@@ -1,72 +1,135 @@
-"""Avalia o pipeline treinado no split de teste e salva métricas em JSON."""
+"""Evaluate a fitted classifier on processed validation and official test data."""
 
 from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Iterable
 from pathlib import Path
+from typing import Protocol
 
 import pandas as pd
-from sklearn.metrics import accuracy_score, classification_report, f1_score
-from sklearn.pipeline import Pipeline
+from sklearn.metrics import (
+    accuracy_score,
+    confusion_matrix,
+    precision_recall_fscore_support,
+)
 
-from src.data.make_dataset import load_raw_dataset, split_dataset
+from src.data.make_dataset import load_processed_split
 from src.models.registry import load_pipeline
-from src.utils.config_loader import load_config
+from src.utils.config_loader import ExperimentConfig, load_config
 
 logger = logging.getLogger(__name__)
 
 
-def evaluate(pipeline: Pipeline, test_df: pd.DataFrame, cfg: dict) -> dict:
-    """Calcula accuracy, F1 macro e o classification report completo."""
-    text_col = cfg["data"]["text_column"]
-    label_col = cfg["data"]["label_column"]
+class Predictor(Protocol):
+    """Prediction interface required by evaluation."""
 
-    y_true = test_df[label_col]
-    y_pred = pipeline.predict(test_df[text_col])
+    def predict(self, texts: Iterable[str]) -> Iterable[str]:
+        """Predict one label per text."""
+        ...
 
+
+def _averaged_metrics(
+    truth: Iterable[str], predicted: Iterable[str], labels: list[str], average: str
+) -> dict[str, float]:
+    """Compute precision, recall and F1 for one averaging method."""
+    precision, recall, f1, _ = precision_recall_fscore_support(
+        truth, predicted, labels=labels, average=average, zero_division=0
+    )
+    return {"precision": float(precision), "recall": float(recall), "f1": float(f1)}
+
+
+def _per_class_metrics(
+    truth: Iterable[str], predicted: Iterable[str], labels: list[str]
+) -> dict[str, dict[str, float | int]]:
+    """Compute ordered precision, recall, F1 and support for every class."""
+    precision, recall, f1, support = precision_recall_fscore_support(
+        truth, predicted, labels=labels, zero_division=0
+    )
     return {
-        "accuracy": accuracy_score(y_true, y_pred),
-        "f1_macro": f1_score(y_true, y_pred, average="macro"),
-        "n_test_samples": len(test_df),
-        "classification_report": classification_report(
-            y_true, y_pred, output_dict=True, zero_division=0
-        ),
+        label: {
+            "precision": float(precision[index]),
+            "recall": float(recall[index]),
+            "f1": float(f1[index]),
+            "support": int(support[index]),
+        }
+        for index, label in enumerate(labels)
     }
 
 
-def main() -> None:
-    """Reavalia o modelo salvo no split de teste e grava metrics/eval_metrics.json."""
-    cfg = load_config()
+def _minority_classes(truth: pd.Series, labels: list[str]) -> list[str]:
+    """Select the two least frequent classes with canonical tie-breaking."""
+    counts = truth.value_counts().to_dict()
+    positions = {label: index for index, label in enumerate(labels)}
+    return sorted(labels, key=lambda label: (counts.get(label, 0), positions[label]))[
+        :2
+    ]
 
-    raw_path = Path(cfg["data"]["raw_path"]) / cfg["data"]["raw_file"]
-    df = load_raw_dataset(
-        raw_path, cfg["data"]["text_column"], cfg["data"]["label_column"]
-    )
-    _train_df, _val_df, test_df = split_dataset(
-        df,
-        cfg["data"]["label_column"],
-        test_size=cfg["split"]["test_size"],
-        val_size=cfg["split"]["val_size"],
-        random_state=cfg["split"]["random_state"],
-    )
 
+def evaluate_split(
+    predictor: Predictor,
+    frame: pd.DataFrame,
+    labels: list[str],
+    text_column: str,
+    label_column: str,
+) -> dict:
+    """Compute complete metrics for one immutable processed split."""
+    truth = frame[label_column]
+    predicted = list(predictor.predict(frame[text_column]))
+    per_class = _per_class_metrics(truth, predicted, labels)
+    minority = _minority_classes(truth, labels)
+    minority_recall = sum(per_class[label]["recall"] for label in minority) / 2
+    return {
+        "n_samples": len(frame),
+        "accuracy": float(accuracy_score(truth, predicted)),
+        "per_class": per_class,
+        "macro_avg": _averaged_metrics(truth, predicted, labels, "macro"),
+        "weighted_avg": _averaged_metrics(truth, predicted, labels, "weighted"),
+        "minority_classes": minority,
+        "minority_class_recall_mean": float(minority_recall),
+        "labels": labels,
+        "confusion_matrix": confusion_matrix(truth, predicted, labels=labels).tolist(),
+    }
+
+
+def evaluate_splits(
+    predictor: Predictor,
+    validation: pd.DataFrame,
+    test: pd.DataFrame,
+    config: ExperimentConfig,
+) -> dict[str, dict]:
+    """Evaluate validation and official test without fitting the predictor."""
+    arguments = (config.data.labels, config.data.text_column, config.data.label_column)
+    return {
+        "validation": evaluate_split(predictor, validation, *arguments),
+        "test": evaluate_split(predictor, test, *arguments),
+    }
+
+
+def evaluate_from_processed(config: ExperimentConfig) -> dict[str, dict]:
+    """Load the persisted pipeline and both immutable evaluation splits."""
     pipeline = load_pipeline(
-        Path(cfg["artifacts"]["model_path"]), cfg["artifacts"]["pipeline_file"]
+        config.artifacts.model_path, config.artifacts.pipeline_file
     )
-    metrics = evaluate(pipeline, test_df, cfg)
+    validation = load_processed_split(config, config.data.validation_output_file)
+    test = load_processed_split(config, config.data.test_output_file)
+    return evaluate_splits(pipeline, validation, test, config)
 
-    metrics_path = Path("metrics/eval_metrics.json")
-    metrics_path.parent.mkdir(parents=True, exist_ok=True)
-    metrics_path.write_text(
-        json.dumps(metrics, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
-    logger.info(
-        "Avaliação concluída — accuracy=%.4f f1_macro=%.4f (salvo em %s)",
-        metrics["accuracy"],
-        metrics["f1_macro"],
-        metrics_path,
-    )
+
+def write_metrics(metrics: dict, path: Path) -> None:
+    """Persist JSON metrics with stable UTF-8 formatting."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(metrics, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def main() -> None:
+    """Evaluate processed validation/test and persist eval_metrics.json."""
+    config = load_config()
+    metrics = evaluate_from_processed(config)
+    metrics_path = config.artifacts.metrics_path / config.artifacts.metrics_file
+    write_metrics(metrics, metrics_path)
+    logger.info("Validation and test metrics saved at %s", metrics_path)
 
 
 if __name__ == "__main__":

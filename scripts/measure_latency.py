@@ -1,8 +1,4 @@
-"""Compara a latência de inferência: pipeline scikit-learn puro vs. ONNX Runtime.
-
-Gera `metrics/latency_comparison.json`, usado no README/vídeo STAR (Etapa 4)
-como evidência da otimização de latência aplicada.
-"""
+"""Compare sklearn and ONNX predictor latency with one neutral English text."""
 
 from __future__ import annotations
 
@@ -11,96 +7,70 @@ import json
 import logging
 import time
 from collections.abc import Callable
-from pathlib import Path
 
-import joblib
 import numpy as np
-import onnxruntime as ort
 
-from src.models.registry import load_pipeline
+from src.serving.model_loader import load_predictor
 from src.utils.config_loader import load_config
 from src.utils.logging_config import configure_logging
 
 logger = logging.getLogger(__name__)
-
-_SAMPLE_TEXT = (
-    "Paciente do sexo feminino, 45 anos, comparece à emergência. "
-    "Relato clínico: dor torácica intensa e súbita, irradiando para o braço esquerdo."
+SAMPLE_TEXT = (
+    "The medical abstract describes a cardiovascular condition with persistent "
+    "vascular inflammation and reduced ventricular function."
 )
 
 
 def _benchmark(
-    fn: Callable[[], object], n_runs: int, n_warmup: int = 5
+    operation: Callable[[], object], runs: int, warmup: int = 5
 ) -> dict[str, float]:
-    for _ in range(n_warmup):
-        fn()
+    """Measure mean and latency percentiles in milliseconds."""
+    for _ in range(warmup):
+        operation()
     timings = []
-    for _ in range(n_runs):
+    for _ in range(runs):
         start = time.perf_counter()
-        fn()
-        timings.append((time.perf_counter() - start) * 1000)  # ms
-    arr = np.array(timings)
+        operation()
+        timings.append((time.perf_counter() - start) * 1000)
+    values = np.asarray(timings)
     return {
-        "mean_ms": float(arr.mean()),
-        "p50_ms": float(np.percentile(arr, 50)),
-        "p95_ms": float(np.percentile(arr, 95)),
-        "p99_ms": float(np.percentile(arr, 99)),
+        "mean_ms": float(values.mean()),
+        "p50_ms": float(np.percentile(values, 50)),
+        "p95_ms": float(np.percentile(values, 95)),
+        "p99_ms": float(np.percentile(values, 99)),
     }
 
 
 def main() -> None:
-    """Roda o benchmark sklearn-vs-ONNX e grava o comparativo em metrics/."""
+    """Benchmark both TriagePredictor implementations and persist results."""
     configure_logging()
-    cfg = load_config()
-
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--n-runs", type=int, default=200)
-    args = parser.parse_args()
-
-    artifacts_path = Path(cfg["artifacts"]["model_path"])
-    onnx_path = Path(cfg["artifacts"]["onnx_path"])
-
-    sklearn_pipeline = load_pipeline(artifacts_path, cfg["artifacts"]["pipeline_file"])
+    arguments = parser.parse_args()
+    sklearn_predictor = load_predictor("sklearn")
+    onnx_predictor = load_predictor("onnx")
     sklearn_result = _benchmark(
-        lambda: sklearn_pipeline.predict([_SAMPLE_TEXT]), args.n_runs
+        lambda: sklearn_predictor.predict(SAMPLE_TEXT), arguments.n_runs
     )
+    onnx_result = _benchmark(
+        lambda: onnx_predictor.predict(SAMPLE_TEXT), arguments.n_runs
+    )
+    _write_results(arguments.n_runs, sklearn_result, onnx_result)
 
-    onnx_file = onnx_path / cfg["artifacts"]["onnx_file"]
-    if not onnx_file.exists():
-        raise FileNotFoundError(
-            f"Modelo ONNX não encontrado em {onnx_file}. "
-            "Rode `make export-onnx` primeiro."
-        )
-    vectorizer = joblib.load(onnx_path / "vectorizer.joblib")
-    session = ort.InferenceSession(str(onnx_file), providers=["CPUExecutionProvider"])
-    input_name = session.get_inputs()[0].name
 
-    def _onnx_predict() -> None:
-        vector = vectorizer.transform([_SAMPLE_TEXT]).toarray().astype(np.float32)
-        session.run(None, {input_name: vector})
-
-    onnx_result = _benchmark(_onnx_predict, args.n_runs)
-
-    speedup = sklearn_result["mean_ms"] / onnx_result["mean_ms"]
+def _write_results(runs: int, sklearn_result: dict, onnx_result: dict) -> None:
+    """Persist benchmark results under the configured metrics path."""
+    config = load_config()
     comparison = {
-        "n_runs": args.n_runs,
+        "n_runs": runs,
         "sklearn": sklearn_result,
         "onnx": onnx_result,
-        "speedup_x": speedup,
+        "speedup_x": sklearn_result["mean_ms"] / onnx_result["mean_ms"],
     }
-
-    metrics_path = Path("metrics/latency_comparison.json")
-    metrics_path.parent.mkdir(parents=True, exist_ok=True)
-    metrics_path.write_text(
-        json.dumps(comparison, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
-    logger.info(
-        "Latência média — sklearn=%.3fms onnx=%.3fms (speedup=%.2fx). Salvo em %s",
-        sklearn_result["mean_ms"],
-        onnx_result["mean_ms"],
-        speedup,
-        metrics_path,
-    )
+    path = config.artifacts.metrics_path / "latency_comparison.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(comparison, indent=2), encoding="utf-8")
+    logger.info("Latency comparison saved at %s", path)
 
 
 if __name__ == "__main__":

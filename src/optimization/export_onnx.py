@@ -1,83 +1,94 @@
-"""Otimização de latência — exporta o classificador treinado para ONNX Runtime.
-
-A vetorização TF-IDF permanece em scikit-learn (já é barata); a etapa cara de
-inferência (Random Forest / Logistic Regression) é convertida para ONNX, que
-roda via onnxruntime com overhead de dispatch bem menor que o predict do
-scikit-learn puro. `scripts/measure_latency.py` compara os dois caminhos.
-"""
+"""Export the fitted classifier to ONNX and persist its feature prefix."""
 
 from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import joblib
 from skl2onnx import convert_sklearn
 from skl2onnx.common.data_types import FloatTensorType
+from sklearn.pipeline import Pipeline
 
+from src.models.artifact_contract import validate_artifact_classes
 from src.models.registry import load_pipeline
-from src.utils.config_loader import load_config
+from src.utils.config_loader import ArtifactConfig, load_config
 
 if TYPE_CHECKING:
     from onnx import ModelProto
-    from sklearn.pipeline import Pipeline
+    from sklearn.base import BaseEstimator
 
 logger = logging.getLogger(__name__)
 
 
-def export_classifier_to_onnx(pipeline: Pipeline, n_features: int) -> ModelProto:
-    """Converte apenas o estágio `classifier` do pipeline sklearn para ONNX.
+@dataclass(frozen=True)
+class OnnxArtifactPaths:
+    """Paths written by one ONNX export."""
 
-    O `zipmap=False` evita que o skl2onnx envolva a saída de probabilidades
-    em uma lista de dicts — mantemos um tensor denso, mais simples e mais
-    rápido de consumir no lado do serving.
-    """
-    classifier = pipeline.named_steps["classifier"]
+    model: Path
+    feature_pipeline: Path
+    classes: Path
+
+
+def split_feature_prefix(pipeline: Pipeline) -> tuple[Pipeline, BaseEstimator]:
+    """Separate all feature steps from the final classifier."""
+    step_name, classifier = pipeline.steps[-1]
+    if step_name != "classifier":
+        raise ValueError("the final pipeline step must be named 'classifier'")
+    return Pipeline(pipeline.steps[:-1]), classifier
+
+
+def export_classifier_to_onnx(classifier: BaseEstimator) -> ModelProto:
+    """Convert one fitted classifier with dense probability output."""
+    n_features = int(classifier.n_features_in_)
     initial_type = [("input", FloatTensorType([None, n_features]))]
-    model: ModelProto = convert_sklearn(
+    return convert_sklearn(
         classifier,
         initial_types=initial_type,
         options={id(classifier): {"zipmap": False}},
     )
-    return model
+
+
+def _artifact_paths(path: Path, config: ArtifactConfig) -> OnnxArtifactPaths:
+    """Resolve the stable ONNX artifact paths."""
+    return OnnxArtifactPaths(
+        path / config.onnx_file,
+        path / config.feature_pipeline_file,
+        path / config.classes_file,
+    )
+
+
+def export_pipeline_artifacts(
+    pipeline: Pipeline,
+    onnx_path: Path,
+    config: ArtifactConfig,
+    expected_classes: list[str],
+) -> OnnxArtifactPaths:
+    """Persist feature prefix, ONNX classifier and probability class order."""
+    prefix, classifier = split_feature_prefix(pipeline)
+    classes = validate_artifact_classes(list(classifier.classes_), expected_classes)
+    onnx_model = export_classifier_to_onnx(classifier)
+    onnx_path.mkdir(parents=True, exist_ok=True)
+    paths = _artifact_paths(onnx_path, config)
+    paths.model.write_bytes(onnx_model.SerializeToString())
+    joblib.dump(prefix, paths.feature_pipeline)
+    paths.classes.write_text(json.dumps(classes), encoding="utf-8")
+    return paths
 
 
 def main() -> None:
-    """Carrega o pipeline treinado e exporta o classificador para ONNX."""
-    cfg = load_config()
-    artifacts_path = Path(cfg["artifacts"]["model_path"])
-    onnx_path = Path(cfg["artifacts"]["onnx_path"])
-    onnx_path.mkdir(parents=True, exist_ok=True)
-
-    pipeline = load_pipeline(artifacts_path, cfg["artifacts"]["pipeline_file"])
-    vectorizer = pipeline.named_steps["tfidf"]
-    n_features = len(vectorizer.idf_)
-
-    onnx_model = export_classifier_to_onnx(pipeline, n_features)
-
-    onnx_file = onnx_path / cfg["artifacts"]["onnx_file"]
-    onnx_file.write_bytes(onnx_model.SerializeToString())
-
-    # O vetorizador TF-IDF fica fora do grafo ONNX — precisa acompanhar o
-    # classificador para que o serving em modo "onnx" saiba tokenizar o texto.
-    vectorizer_file = onnx_path / "vectorizer.joblib"
-    joblib.dump(vectorizer, vectorizer_file)
-
-    # A ordem das colunas de probabilidade retornadas pelo ONNX runtime segue
-    # `classifier.classes_` — precisa ser persistida para o serving remontar
-    # o rótulo a partir do índice da maior probabilidade.
-    classes_file = onnx_path / "classes.json"
-    classifier = pipeline.named_steps["classifier"]
-    classes_file.write_text(json.dumps(list(classifier.classes_)), encoding="utf-8")
-
-    logger.info(
-        "Classificador exportado para ONNX em %s (vetorizador em %s, %d features)",
-        onnx_file,
-        vectorizer_file,
-        n_features,
+    """Load the fitted pipeline and write every ONNX serving artifact."""
+    config = load_config()
+    pipeline = load_pipeline(
+        config.artifacts.model_path, config.artifacts.pipeline_file
     )
+    paths = export_pipeline_artifacts(
+        pipeline, config.artifacts.onnx_path, config.artifacts, config.data.labels
+    )
+    logger.info("ONNX classifier exported to %s", paths.model)
 
 
 if __name__ == "__main__":
