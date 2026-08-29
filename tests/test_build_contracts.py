@@ -38,6 +38,15 @@ def test_airflow_uses_reproducible_custom_image() -> None:
     assert "_PIP_ADDITIONAL_REQUIREMENTS" not in common["environment"]
 
 
+def test_airflow_build_files_belong_to_runtime_user() -> None:
+    dockerfile = _read("Dockerfile.airflow")
+
+    assert (
+        "COPY --chown=airflow:root pyproject.toml poetry.lock /tmp/project/"
+        in dockerfile
+    )
+
+
 def test_ci_provisions_nlp_resources() -> None:
     workflow = _read(".github/workflows/ci.yml")
 

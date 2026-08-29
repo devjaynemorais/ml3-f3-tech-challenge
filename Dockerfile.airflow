@@ -7,7 +7,7 @@ ENV NLTK_DATA=/home/airflow/nltk_data \
     POETRY_NO_INTERACTION=1 \
     POETRY_VIRTUALENVS_CREATE=false
 
-COPY pyproject.toml poetry.lock /tmp/project/
+COPY --chown=airflow:root pyproject.toml poetry.lock /tmp/project/
 
 RUN pip install --no-cache-dir "poetry==${POETRY_VERSION}" \
     && cd /tmp/project \
