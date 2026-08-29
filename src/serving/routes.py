@@ -48,8 +48,8 @@ def predict(
     try:
         label, scores = predictor.predict(request.text)
     except Exception as error:  # noqa: BLE001 - map backend failures to API contract
-        logger.exception("Unexpected model inference failure")
-        raise HTTPException(status_code=500, detail="Model inference failed") from error
+        logger.error("Unexpected model inference failure (%s)", type(error).__name__)
+        raise HTTPException(status_code=500, detail="Model inference failed") from None
     PREDICTION_COUNT.labels(predicted_label=label).inc()
     return {"label": label, "scores": scores, "backend": predictor.backend}
 

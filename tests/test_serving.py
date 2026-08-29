@@ -20,7 +20,7 @@ class _FailingPredictor:
     backend = "fake"
 
     def predict(self, text: str) -> tuple[str, dict[str, float]]:
-        raise RuntimeError("inference failed")
+        raise RuntimeError(text)
 
 
 def _missing_predictor():
@@ -103,7 +103,7 @@ def test_inference_failure_returns_500_without_logging_text(
 
     assert response.status_code == 500
     assert secret_text not in caplog.text
-    assert "inference failed" in caplog.text
+    assert "Unexpected model inference failure (RuntimeError)" in caplog.text
 
 
 def test_metrics_endpoint_exposes_preserved_prometheus_names() -> None:
