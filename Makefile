@@ -1,5 +1,5 @@
 .PHONY: env install nlp-resources lint format test test-cov \
-        dataset train evaluate export-onnx benchmark-latency pipeline \
+        dataset train evaluate promote export-onnx benchmark-latency pipeline \
         api mlflow compose-build compose-up compose-down \
         airflow-up airflow-down
 
@@ -54,6 +54,12 @@ train:
 
 evaluate:
 	$(POETRY) run python -m src.evaluation.evaluate
+
+# Registra o melhor run (por metrics.<registry.metric> no MLflow) no Model
+# Registry e promove para registry.stage. Requer MLflow acessível — rode
+# depois de make train + make evaluate.
+promote:
+	$(POETRY) run python -m src.models.promote
 
 export-onnx:
 	$(POETRY) run python -m src.optimization.export_onnx

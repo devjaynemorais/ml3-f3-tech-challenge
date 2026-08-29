@@ -190,6 +190,22 @@ serviço `train` sobrescreve para `http://mlflow:5000`. O backend local
 (`make mlflow`) usa `mlflow.db`/`mlartifacts/` na raiz do projeto; o
 containerizado usa `mlflow-data/` — são históricos independentes.
 
+### Model Registry
+
+Depois de `make train` + `make evaluate` (idealmente rodado uma vez por
+Strategy — `logistic_regression`, `random_forest`, `gradient_boosting` — para
+ter runs comparáveis), `make promote` busca no experimento o run com melhor
+`registry.metric` (padrão: `validation_macro_f1`, configurável em
+`config/config.yaml`; validação, não teste, para não enviesar a escolha pelo
+conjunto de teste oficial), registra o artefato no MLflow Model Registry e
+promove para `registry.stage` (padrão `Production`). O resultado fica em
+`models/promoted_model.json` (fora do Git) e na aba **Models** da UI do
+MLflow.
+
+```bash
+make promote
+```
+
 ## Airflow
 
 ```bash

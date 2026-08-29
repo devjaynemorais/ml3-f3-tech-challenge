@@ -132,6 +132,15 @@ class ArtifactConfig(BaseModel):
     metrics_file: str
 
 
+class RegistryConfig(BaseModel):
+    """Selection criteria for promoting a run in the MLflow Model Registry."""
+
+    model_name: str
+    metric: str
+    ascending: bool
+    stage: str
+
+
 class ExperimentConfig(BaseModel):
     """Typed root configuration for the complete ML system."""
 
@@ -142,6 +151,7 @@ class ExperimentConfig(BaseModel):
     features: FeatureConfig
     model: ModelConfig
     artifacts: ArtifactConfig
+    registry: RegistryConfig
 
 
 @lru_cache(maxsize=8)

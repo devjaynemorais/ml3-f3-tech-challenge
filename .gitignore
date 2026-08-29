@@ -91,6 +91,7 @@ models/artifacts/*
 models/onnx/*
 !models/artifacts/.gitkeep
 !models/onnx/.gitkeep
+models/promoted_model.json
 
 # Métricas geradas em runtime
 metrics/*.json

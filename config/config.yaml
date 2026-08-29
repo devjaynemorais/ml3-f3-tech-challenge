@@ -75,3 +75,10 @@ artifacts:
   classes_file: classes.json
   metrics_path: metrics
   metrics_file: eval_metrics.json
+
+registry:
+  model_name: medical_text_classifier
+  # Metrica de VALIDACAO (nao teste) usada para escolher o run a promover.
+  metric: validation_macro_f1
+  ascending: false
+  stage: Production
