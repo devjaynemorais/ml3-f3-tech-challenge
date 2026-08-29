@@ -105,9 +105,13 @@ airflow/airflow.db
 # Grafana (estado runtime do container)
 monitoring/grafana/data/
 
+# MLflow (backend store e artefatos do container)
+mlflow-data/
+
 # Claude Code agent skills e tooling local
 .agents/
 data/skills/
 skills-lock.json
 docs/todo.md
 .claude/settings.local.json
+routine.md

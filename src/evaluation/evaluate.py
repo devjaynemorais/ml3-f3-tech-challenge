@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import sys
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Protocol
 
+import mlflow
 import pandas as pd
 from sklearn.metrics import (
     accuracy_score,
@@ -16,7 +19,7 @@ from sklearn.metrics import (
 )
 
 from src.data.make_dataset import load_processed_split
-from src.models.registry import load_pipeline
+from src.models.registry import load_metadata, load_pipeline
 from src.utils.config_loader import ExperimentConfig, load_config
 
 logger = logging.getLogger(__name__)
@@ -123,12 +126,45 @@ def write_metrics(metrics: dict, path: Path) -> None:
     path.write_text(json.dumps(metrics, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
+def _log_split_metrics(split_name: str, split_metrics: dict) -> None:
+    """Log one split's tracked summary metrics to the active MLflow run."""
+    mlflow.log_metric(f"{split_name}_accuracy", split_metrics["accuracy"])
+    mlflow.log_metric(f"{split_name}_macro_f1", split_metrics["macro_avg"]["f1"])
+    mlflow.log_metric(f"{split_name}_weighted_f1", split_metrics["weighted_avg"]["f1"])
+    mlflow.log_metric(
+        f"{split_name}_minority_recall_mean",
+        split_metrics["minority_class_recall_mean"],
+    )
+
+
+def log_metrics_to_mlflow(run_id: str, metrics: dict[str, dict]) -> None:
+    """Attach validation/test summary metrics to the training's MLflow run."""
+    tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5000")
+    if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    try:
+        mlflow.set_tracking_uri(tracking_uri)
+        with mlflow.start_run(run_id=run_id):
+            for split_name, split_metrics in metrics.items():
+                _log_split_metrics(split_name, split_metrics)
+    except Exception:
+        logger.warning(
+            "MLflow tracking unavailable at %s; skipping metric log", tracking_uri
+        )
+
+
 def main() -> None:
     """Evaluate processed validation/test and persist eval_metrics.json."""
     config = load_config()
     metrics = evaluate_from_processed(config)
     metrics_path = config.artifacts.metrics_path / config.artifacts.metrics_file
     write_metrics(metrics, metrics_path)
+    metadata = load_metadata(
+        config.artifacts.model_path, config.artifacts.metadata_file
+    )
+    run_id = metadata.get("mlflow_run_id")
+    if run_id:
+        log_metrics_to_mlflow(run_id, metrics)
     logger.info("Validation and test metrics saved at %s", metrics_path)
 
 

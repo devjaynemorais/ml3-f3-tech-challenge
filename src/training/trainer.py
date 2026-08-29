@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import logging
+import os
+import sys
 
+import mlflow
+import mlflow.sklearn
 import pandas as pd
 from sklearn.pipeline import Pipeline
 
@@ -47,11 +51,40 @@ def train_from_processed(config: ExperimentConfig) -> tuple[Pipeline, dict]:
     return train(training, config)
 
 
+def log_run_to_mlflow(
+    config: ExperimentConfig, metadata: dict, pipeline: Pipeline
+) -> str | None:
+    """Log params and the fitted pipeline to MLflow; return the run id, or None."""
+    tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5000")
+    if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+        # MLflow prints a run-URL summary with emoji; Windows consoles default
+        # to cp1252, which raises UnicodeEncodeError on that summary.
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    run_name = f"{metadata['model_type']}-tfidf"
+    try:
+        mlflow.set_tracking_uri(tracking_uri)
+        mlflow.set_experiment(config.project.name)
+        with mlflow.start_run(run_name=run_name) as run:
+            mlflow.log_params(metadata["model_parameters"])
+            mlflow.log_param("model_type", metadata["model_type"])
+            mlflow.log_param("n_train_samples", metadata["n_train_samples"])
+            mlflow.sklearn.log_model(pipeline, artifact_path="model")
+            return run.info.run_id
+    except Exception:
+        logger.warning(
+            "MLflow tracking unavailable at %s; skipping run log", tracking_uri
+        )
+        return None
+
+
 def main() -> None:
     """Train from processed data and persist the pipeline and metadata."""
     config = load_config()
     set_seed(config.split.random_state)
     pipeline, metadata = train_from_processed(config)
+    run_id = log_run_to_mlflow(config, metadata, pipeline)
+    if run_id:
+        metadata["mlflow_run_id"] = run_id
     model_path = save_pipeline(
         pipeline,
         config.artifacts.model_path,

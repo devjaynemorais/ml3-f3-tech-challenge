@@ -148,11 +148,30 @@ Serviços locais:
 - API: `http://localhost:8000`
 - Prometheus: `http://localhost:9090`
 - Grafana: `http://localhost:3000` (`admin`/`admin` por padrão)
+- MLflow: `http://localhost:5000`
 
 O dashboard provisionado apresenta total e taxa de requisições, taxa de erro,
 latência p50/p95 e distribuição das categorias médicas. As métricas preservadas
 são `http_requests_total`, `http_request_duration_seconds` e
 `triage_predictions_total`.
+
+## MLflow
+
+Cada execução de `make train` (ou `docker compose run --rm train`) registra no
+MLflow os hiperparâmetros do modelo selecionado, `model_type`,
+`n_train_samples` e o pipeline treinado como artefato. Se o servidor MLflow
+não estiver acessível, o treino continua normalmente e apenas um aviso é
+logado — o tracking nunca bloqueia o pipeline.
+
+Local (fora do Docker), suba só o serviço do MLflow antes de treinar:
+
+```bash
+docker compose up -d mlflow
+make train
+```
+
+`MLFLOW_TRACKING_URI` no `.env` controla o endpoint usado por `make train`;
+dentro do compose, o serviço `train` sobrescreve para `http://mlflow:5000`.
 
 ## Airflow
 
