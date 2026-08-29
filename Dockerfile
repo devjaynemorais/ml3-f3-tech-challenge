@@ -19,13 +19,20 @@ RUN .venv/bin/python -m nltk.downloader -d /app/.venv/nltk_data stopwords \
     && .venv/bin/python -m pip install --no-cache-dir "${SPACY_MODEL_URL}"
 
 
+# Stage 1b: builder-train — adiciona mlflow (grupo "train") ao venv do
+# builder. Mantido fora do stage "api", que nunca importa mlflow em runtime.
+FROM builder AS builder-train
+
+RUN poetry install --only main,train --no-root && rm -rf "${POETRY_CACHE_DIR}"
+
+
 # Stage 2: train — jobs de treino/avaliação/otimização (usado pelo Airflow e
 # pelo `docker compose run --rm train`)
 FROM python:3.11-slim AS train
 
 WORKDIR /app
 
-COPY --from=builder /app/.venv /app/.venv
+COPY --from=builder-train /app/.venv /app/.venv
 COPY src/ src/
 COPY scripts/ scripts/
 COPY config/ config/
