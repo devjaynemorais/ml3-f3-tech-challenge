@@ -1,6 +1,6 @@
 .PHONY: env install nlp-resources lint format test test-cov \
         dataset train evaluate export-onnx benchmark-latency pipeline \
-        api compose-build compose-up compose-down \
+        api mlflow compose-build compose-up compose-down \
         airflow-up airflow-down
 
 # `poetry` nem sempre está no PATH (ex.: Windows Store Python instala o script
@@ -70,6 +70,16 @@ API_PORT ?= 8000
 api:
 	$(POETRY) run uvicorn src.serving.api:app \
 		--host 0.0.0.0 --port $(API_PORT) --reload
+
+# MLflow local (sem Docker) — abre na hora, sem pull/build de imagem.
+# Porta parametrizável: make mlflow MLFLOW_PORT=5001 (ajuste MLFLOW_TRACKING_URI no .env)
+MLFLOW_PORT ?= 5000
+mlflow:
+	$(POETRY) run mlflow server \
+		--host 0.0.0.0 \
+		--port $(MLFLOW_PORT) \
+		--backend-store-uri sqlite:///mlflow.db \
+		--default-artifact-root ./mlartifacts
 
 # ─── Docker: API + Prometheus + Grafana ────────────────────────────────────────
 

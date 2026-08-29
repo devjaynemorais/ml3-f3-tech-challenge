@@ -105,8 +105,13 @@ airflow/airflow.db
 # Grafana (estado runtime do container)
 monitoring/grafana/data/
 
-# MLflow (backend store e artefatos do container)
+# MLflow — container (docker compose up mlflow)
 mlflow-data/
+
+# MLflow — local (make mlflow, sem Docker)
+mlflow.db
+mlruns/
+mlartifacts/
 
 # Claude Code agent skills e tooling local
 .agents/

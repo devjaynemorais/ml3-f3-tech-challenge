@@ -157,21 +157,38 @@ são `http_requests_total`, `http_request_duration_seconds` e
 
 ## MLflow
 
-Cada execução de `make train` (ou `docker compose run --rm train`) registra no
-MLflow os hiperparâmetros do modelo selecionado, `model_type`,
-`n_train_samples` e o pipeline treinado como artefato. Se o servidor MLflow
-não estiver acessível, o treino continua normalmente e apenas um aviso é
-logado — o tracking nunca bloqueia o pipeline.
+Cada `make train` registra no MLflow os hiperparâmetros do modelo
+selecionado, `model_type`, `n_train_samples` e o pipeline treinado como
+artefato; o `make evaluate` seguinte reabre a mesma run (via `run_id`
+salvo em `model_metadata.json`) e anexa accuracy, macro/weighted F1 e
+recall médio das classes minoritárias de validação e teste. Runs nascem
+nomeadas `{model_type}-tfidf`, para comparar diferentes Strategies lado a
+lado. Se o servidor MLflow não estiver acessível, o treino/avaliação
+continuam normalmente e só um aviso é logado — o tracking nunca bloqueia o
+pipeline.
 
-Local (fora do Docker), suba só o serviço do MLflow antes de treinar:
+Duas formas de subir o servidor, escolha uma:
 
 ```bash
+# Local (sem Docker) — inicia na hora, sem pull/build de imagem
+make mlflow
+
+# Ou containerizado, junto do resto da stack
 docker compose up -d mlflow
-make train
 ```
 
-`MLFLOW_TRACKING_URI` no `.env` controla o endpoint usado por `make train`;
-dentro do compose, o serviço `train` sobrescreve para `http://mlflow:5000`.
+Depois, treine normalmente:
+
+```bash
+make train
+make evaluate
+```
+
+`MLFLOW_TRACKING_URI` no `.env` controla o endpoint usado localmente
+(`http://localhost:5000` nos dois casos acima); dentro do compose, o
+serviço `train` sobrescreve para `http://mlflow:5000`. O backend local
+(`make mlflow`) usa `mlflow.db`/`mlartifacts/` na raiz do projeto; o
+containerizado usa `mlflow-data/` — são históricos independentes.
 
 ## Airflow
 
