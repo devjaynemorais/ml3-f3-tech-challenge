@@ -39,7 +39,7 @@ preprocessing:
   preserve_numbers: true
 
 features:
-  type: tfidf  # tfidf | embeddings
+  type: embeddings  # tfidf | embeddings
   max_features: 5000
   ngram_range: [1, 2]
   min_df: 2
