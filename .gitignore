@@ -94,6 +94,7 @@ data/external/*
 # Modelos e artefatos treinados
 models/artifacts/*
 models/onnx/*
+models/bert_experiment/
 !models/artifacts/.gitkeep
 !models/onnx/.gitkeep
 models/promoted_model.json
@@ -123,6 +124,13 @@ mlartifacts/
 .agents/
 data/skills/
 skills-lock.json
+# Anotações locais de progresso dos agentes (não são documentação da entrega)
 docs/todo.md
+docs/todo-*.md
+docs/progresso*.md
+docs/progress*.md
+docs/status*.md
+docs/notes*.md
+docs/superpowers/plans/
 .claude/settings.local.json
 routine.md
