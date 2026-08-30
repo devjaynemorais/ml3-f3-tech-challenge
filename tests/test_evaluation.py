@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -85,3 +87,134 @@ def test_evaluate_split_reports_complete_class_and_aggregate_metrics() -> None:
     assert set(metrics["weighted_avg"]) == {"precision", "recall", "f1"}
     assert metrics["minority_classes"] == CANONICAL_LABELS[:2]
     assert metrics["minority_class_recall_mean"] == pytest.approx(0.5)
+
+
+class _FixedProbaPredictor:
+    def __init__(self, classes: list[str], probabilities: np.ndarray) -> None:
+        self.classes_ = classes
+        self._probabilities = probabilities
+
+    def predict_proba(self, texts: Iterable[str]) -> np.ndarray:
+        return self._probabilities
+
+
+class _FixedFullPredictor:
+    def __init__(
+        self, predictions: dict[str, str], probabilities: np.ndarray, classes: list[str]
+    ) -> None:
+        self.predictions = predictions
+        self._probabilities = probabilities
+        self.classes_ = classes
+
+    def predict(self, texts: Iterable[str]) -> list[str]:
+        return [self.predictions[text] for text in texts]
+
+    def predict_proba(self, texts: Iterable[str]) -> np.ndarray:
+        return self._probabilities
+
+
+def _write_raw_corpus(root: Path, config: ExperimentConfig) -> ExperimentConfig:
+    """Write a tiny raw corpus where one abstract carries multiple labels."""
+    raw_path = root / "raw"
+    raw_path.mkdir()
+    labels = pd.DataFrame(
+        {"condition_label": [1, 2, 3, 4, 5], "condition_name": CANONICAL_LABELS}
+    )
+    train = pd.DataFrame(
+        {
+            "medical_abstract": ["shared abstract", "shared abstract", "only in train"],
+            "condition_label": [1, 2, 3],
+        }
+    )
+    test = pd.DataFrame(
+        {
+            "medical_abstract": ["shared abstract", "only in test"],
+            "condition_label": [4, 5],
+        }
+    )
+    labels.to_csv(raw_path / config.data.labels_file, index=False)
+    train.to_csv(raw_path / config.data.train_file, index=False)
+    test.to_csv(raw_path / config.data.test_file, index=False)
+    return config.model_copy(
+        update={"data": config.data.model_copy(update={"raw_path": raw_path})}
+    )
+
+
+def test_build_label_sets_collects_every_label_per_abstract(tmp_path: Path) -> None:
+    config = _write_raw_corpus(tmp_path, _config())
+
+    label_sets = evaluation.build_label_sets(config)
+
+    assert label_sets["shared abstract"] == {
+        CANONICAL_LABELS[0],
+        CANONICAL_LABELS[1],
+        CANONICAL_LABELS[3],
+    }
+    assert label_sets["only in train"] == {CANONICAL_LABELS[2]}
+    assert label_sets["only in test"] == {CANONICAL_LABELS[4]}
+
+
+def test_accuracy_by_label_count_stratifies_correctly() -> None:
+    predicted = ["a", "b", "a", "a"]
+    truth = pd.Series(["a", "a", "a", "b"])
+    label_counts = pd.Series([1, 1, 2, 2])
+
+    result = evaluation._accuracy_by_label_count(predicted, truth, label_counts)
+
+    assert result == {"1": pytest.approx(0.5), "2": pytest.approx(0.5)}
+
+
+def test_top_2_accuracy_counts_truth_within_top_two_scores() -> None:
+    predictor = _FixedProbaPredictor(
+        classes=CANONICAL_LABELS,
+        probabilities=np.array(
+            [
+                [0.5, 0.3, 0.1, 0.05, 0.05],
+                [0.05, 0.6, 0.1, 0.2, 0.05],
+            ]
+        ),
+    )
+    truth = pd.Series([CANONICAL_LABELS[1], CANONICAL_LABELS[0]])
+
+    result = evaluation._top_2_accuracy(predictor, pd.Series(["t1", "t2"]), truth)
+
+    assert result == pytest.approx(0.5)
+
+
+def test_top_2_accuracy_returns_none_without_predict_proba() -> None:
+    result = evaluation._top_2_accuracy(object(), pd.Series(["t"]), pd.Series(["x"]))
+
+    assert result is None
+
+
+def test_evaluate_with_label_sets_merges_honesty_metrics() -> None:
+    config = _config()
+    frame = pd.DataFrame(
+        {
+            config.data.text_column: ["shared", "only-a"],
+            config.data.label_column: [CANONICAL_LABELS[1], CANONICAL_LABELS[2]],
+        }
+    )
+    label_sets = {
+        "shared": {CANONICAL_LABELS[0], CANONICAL_LABELS[1]},
+        "only-a": {CANONICAL_LABELS[2]},
+    }
+    predictor = _FixedFullPredictor(
+        predictions={"shared": CANONICAL_LABELS[0], "only-a": CANONICAL_LABELS[2]},
+        probabilities=np.array(
+            [
+                [0.6, 0.3, 0.05, 0.03, 0.02],
+                [0.05, 0.05, 0.8, 0.06, 0.04],
+            ]
+        ),
+        classes=CANONICAL_LABELS,
+    )
+
+    metrics = evaluation.evaluate_with_label_sets(predictor, frame, config, label_sets)
+
+    assert metrics["in_set_accuracy"] == pytest.approx(1.0)
+    assert metrics["accuracy_by_label_count"] == {
+        "1": pytest.approx(1.0),
+        "2": pytest.approx(0.0),
+    }
+    assert metrics["top_2_accuracy"] == pytest.approx(1.0)

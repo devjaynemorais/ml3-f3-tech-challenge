@@ -27,9 +27,12 @@ classificação por requisição com baixa latência. A arquitetura combina:
 - preprocessing configurável por Strategy e Factory;
 - features por TF-IDF (padrão) ou embeddings biomédicos pré-treinados (spaCy
   `en_core_sci_md`), selecionável no YAML;
-- classificador por Complement Naive Bayes (padrão — melhor F1-macro entre os
-  comparados), Regressão Logística, Linear SVM calibrado, Random Forest ou
-  Gradient Boosting, todos selecionáveis no YAML;
+- classificador por Regressão Logística (padrão — melhor F1-macro em
+  validação cruzada entre os comparados), Complement Naive Bayes, Linear SVM
+  calibrado, Random Forest ou Gradient Boosting, todos selecionáveis no YAML;
+- busca de hiperparâmetros por validação cruzada (`tuning.enabled` no YAML) —
+  `make train` treina com CV sobre treino+validação e persiste o vencedor já
+  re-ajustado nos dois splits;
 - pipeline sklearn persistido e classificador exportável para ONNX Runtime;
 - API FastAPI com modo degradado quando não há artefato válido;
 - Prometheus e Grafana para volume, erros, latência e distribuição de classes;
@@ -37,7 +40,9 @@ classificação por requisição com baixa latência. A arquitetura combina:
 - GitHub Actions para lint, testes, teste arquitetural e build da imagem.
 
 Detalhes e decisões estão em [docs/architecture.md](docs/architecture.md) e as
-limitações do modelo em [docs/model_card.md](docs/model_card.md).
+limitações do modelo em [docs/model_card.md](docs/model_card.md). O
+diagnóstico completo do teto de F1 do corpus e as propostas de melhoria
+avaliadas estão em [docs/plano_melhoria_f1.md](docs/plano_melhoria_f1.md).
 
 ## Decisão de deploy em nuvem
 

@@ -50,8 +50,8 @@ def test_train_from_processed_uses_only_training_split(tmp_path: Path) -> None:
     pipeline, metadata = trainer.train_from_processed(config)
 
     assert metadata["schema_version"] == 2
-    assert metadata["model_type"] == "complement_nb"
-    assert metadata["model_parameters"]["alpha"] == 1.0
+    assert metadata["model_type"] == "logistic_regression"
+    assert metadata["model_parameters"]["C"] == 0.3
     assert metadata["preprocessing_strategies"] == config.preprocessing.steps
     assert metadata["classes"] == CANONICAL_LABELS
     assert metadata["n_train_samples"] == 20

@@ -65,7 +65,7 @@ def test_logistic_regression_strategy_uses_configured_parameters() -> None:
     steps = classifier.ModelFactory.create("logistic_regression").build_steps(config)
 
     assert [name for name, _ in steps] == ["classifier"]
-    assert steps[0][1].get_params()["C"] == 1.0
+    assert steps[0][1].get_params()["C"] == 0.3
     assert steps[0][1].get_params()["class_weight"] == "balanced"
     assert steps[0][1].get_params()["n_jobs"] == -1
 

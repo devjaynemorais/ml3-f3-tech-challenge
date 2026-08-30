@@ -49,9 +49,9 @@ features:
     spacy_model: en_core_sci_md
 
 model:
-  type: complement_nb
+  type: logistic_regression
   logistic_regression:
-    C: 1.0
+    C: 0.3  # vencedor da busca CV (docs/model_card.md)
     max_iter: 1000
     class_weight: balanced
     n_jobs: -1
@@ -92,9 +92,28 @@ artifacts:
 
 registry:
   model_name: medical_text_classifier
-  # Metrica de VALIDACAO (nao teste) usada para escolher o run a promover.
-  # macro_f1 e macro_precision empatam entre os top runs (< 0.1pp); precision
-  # foi o criterio de desempate escolhido.
-  metric: validation_macro_precision
+  # cv_macro_f1_mean (5-fold sobre treino+validacao) em vez de uma metrica de
+  # split unico: com 1.155 linhas de validacao, diferencas < 0.015 sao ruido
+  # (ver docs/plano_melhoria_f1.md, secao 3.6). Desempate por menor desvio
+  # entre folds (modelo mais estavel).
+  metric: cv_macro_f1_mean
   ascending: false
+  tiebreak_metric: cv_macro_f1_std
+  tiebreak_ascending: true
   stage: Production
+
+tuning:
+  enabled: true
+  cv_folds: 3
+  scoring: f1_macro
+  grid:
+    # tfidf fora da grade: o plano ja mediu que max_features=5000/ngram=1-2
+    # (config atual) e o melhor ponto (variacao de so 0.027 no espaco todo).
+    logistic_regression:
+      C: [0.1, 0.3, 1.0]
+      class_weight: [balanced]
+    linear_svm:
+      C: [0.05, 0.1, 0.3]
+      class_weight: [balanced]
+    complement_nb:
+      alpha: [0.5, 1.0, 2.0]

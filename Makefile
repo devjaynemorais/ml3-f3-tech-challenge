@@ -1,5 +1,5 @@
 .PHONY: env install nlp-resources lint format test test-cov \
-        dataset train evaluate promote export-onnx benchmark-latency pipeline \
+        dataset train evaluate promote export-onnx analyze-corpus benchmark-latency pipeline \
         api mlflow compose-build compose-up compose-down \
         airflow-up airflow-down
 
@@ -66,6 +66,10 @@ promote:
 
 export-onnx:
 	$(POETRY) run python -m src.optimization.export_onnx
+
+# Estrutura multi-rotulo do corpus e teto teorico de F1-macro (docs/plano_melhoria_f1.md)
+analyze-corpus:
+	$(POETRY) run python -m scripts.analyze_corpus
 
 benchmark-latency:
 	$(POETRY) run python -m scripts.measure_latency

@@ -11,14 +11,16 @@ from pathlib import Path
 from typing import Protocol
 
 import mlflow
+import numpy as np
 import pandas as pd
 from sklearn.metrics import (
     accuracy_score,
     confusion_matrix,
     precision_recall_fscore_support,
 )
+from sklearn.pipeline import Pipeline
 
-from src.data.make_dataset import load_processed_split
+from src.data.make_dataset import load_medical_corpus, load_processed_split
 from src.models.registry import load_metadata, load_pipeline
 from src.utils.config_loader import ExperimentConfig, load_config
 
@@ -120,10 +122,85 @@ def evaluate_from_processed(config: ExperimentConfig) -> dict[str, dict]:
     return evaluate_splits(pipeline, validation, test, config)
 
 
+def build_label_sets(config: ExperimentConfig) -> dict[str, set[str]]:
+    """Map each raw abstract text to every label it carries in the corpus.
+
+    The Medical Abstracts corpus is multi-label flattened to one row per
+    (text, label) pair: the same abstract can appear under several
+    conditions. This reconstructs the full valid-label set per abstract so
+    evaluation can tell "wrong" from "a different equally valid label."
+    """
+    corpus = load_medical_corpus(config.data)
+    combined = pd.concat([corpus.train, corpus.test], ignore_index=True)
+    grouped = combined.groupby(config.data.text_column)[config.data.label_column]
+    return grouped.agg(set).to_dict()
+
+
+def _accuracy_by_label_count(
+    predicted: list[str],
+    truth: pd.Series,
+    label_counts: pd.Series,
+) -> dict[str, float]:
+    """Stratify accuracy by how many valid labels each abstract carries."""
+    correct = pd.Series(predicted).reset_index(drop=True) == truth.reset_index(
+        drop=True
+    )
+    counts = label_counts.reset_index(drop=True)
+    return {str(k): float(correct[counts == k].mean()) for k in sorted(counts.unique())}
+
+
+def _top_2_accuracy(
+    pipeline: Pipeline, texts: pd.Series, truth: pd.Series
+) -> float | None:
+    """Fraction of rows where truth is among the two highest-scored labels."""
+    if not hasattr(pipeline, "predict_proba"):
+        return None
+    probabilities = pipeline.predict_proba(texts)
+    classes = np.array(pipeline.classes_)
+    top_2 = classes[np.argsort(-probabilities, axis=1)[:, :2]]
+    hits = [label in row for label, row in zip(truth, top_2, strict=True)]
+    return float(np.mean(hits))
+
+
+def evaluate_with_label_sets(
+    pipeline: Pipeline,
+    frame: pd.DataFrame,
+    config: ExperimentConfig,
+    label_sets: dict[str, set[str]],
+) -> dict:
+    """Add corpus-aware honesty metrics on top of the standard split metrics."""
+    text_column, label_column = config.data.text_column, config.data.label_column
+    texts, truth = frame[text_column], frame[label_column]
+    predicted = list(pipeline.predict(texts))
+    label_counts = texts.map(lambda text: len(label_sets.get(text, set())))
+    in_set = [
+        p in label_sets.get(t, set()) for p, t in zip(predicted, texts, strict=True)
+    ]
+    return {
+        "in_set_accuracy": float(np.mean(in_set)),
+        "accuracy_by_label_count": _accuracy_by_label_count(
+            predicted, truth, label_counts
+        ),
+        "top_2_accuracy": _top_2_accuracy(pipeline, texts, truth),
+    }
+
+
 def write_metrics(metrics: dict, path: Path) -> None:
     """Persist JSON metrics with stable UTF-8 formatting."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(metrics, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _log_honesty_metrics(split_name: str, split_metrics: dict) -> None:
+    """Log the corpus-aware metrics from ``evaluate_with_label_sets``, if present."""
+    if "in_set_accuracy" in split_metrics:
+        mlflow.log_metric(
+            f"{split_name}_in_set_accuracy", split_metrics["in_set_accuracy"]
+        )
+    if split_metrics.get("top_2_accuracy") is not None:
+        mlflow.log_metric(
+            f"{split_name}_top_2_accuracy", split_metrics["top_2_accuracy"]
+        )
 
 
 def _log_split_metrics(split_name: str, split_metrics: dict) -> None:
@@ -138,6 +215,7 @@ def _log_split_metrics(split_name: str, split_metrics: dict) -> None:
         f"{split_name}_minority_recall_mean",
         split_metrics["minority_class_recall_mean"],
     )
+    _log_honesty_metrics(split_name, split_metrics)
 
 
 def log_metrics_to_mlflow(run_id: str, metrics: dict[str, dict]) -> None:
@@ -156,18 +234,38 @@ def log_metrics_to_mlflow(run_id: str, metrics: dict[str, dict]) -> None:
         )
 
 
+def _cv_summary(metadata: dict) -> dict:
+    """Build a validation placeholder from CV stats: this split is not held-out."""
+    return {
+        "note": "refit inclui este split (CV-tuning); nao e held-out",
+        "cv_macro_f1_mean": metadata["cv_macro_f1_mean"],
+        "cv_macro_f1_std": metadata["cv_macro_f1_std"],
+        "cv_folds": metadata["cv_folds"],
+    }
+
+
 def main() -> None:
     """Evaluate processed validation/test and persist eval_metrics.json."""
     config = load_config()
-    metrics = evaluate_from_processed(config)
-    metrics_path = config.artifacts.metrics_path / config.artifacts.metrics_file
-    write_metrics(metrics, metrics_path)
     metadata = load_metadata(
         config.artifacts.model_path, config.artifacts.metadata_file
     )
+    metrics = evaluate_from_processed(config)
+    pipeline = load_pipeline(
+        config.artifacts.model_path, config.artifacts.pipeline_file
+    )
+    test = load_processed_split(config, config.data.test_output_file)
+    label_sets = build_label_sets(config)
+    metrics["test"].update(evaluate_with_label_sets(pipeline, test, config, label_sets))
+    loggable_metrics = metrics
+    if metadata.get("refit_includes_validation"):
+        metrics["validation"] = _cv_summary(metadata)
+        loggable_metrics = {"test": metrics["test"]}
+    metrics_path = config.artifacts.metrics_path / config.artifacts.metrics_file
+    write_metrics(metrics, metrics_path)
     run_id = metadata.get("mlflow_run_id")
     if run_id:
-        log_metrics_to_mlflow(run_id, metrics)
+        log_metrics_to_mlflow(run_id, loggable_metrics)
     logger.info("Validation and test metrics saved at %s", metrics_path)
 
 

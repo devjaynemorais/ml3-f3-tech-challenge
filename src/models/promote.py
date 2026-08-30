@@ -27,7 +27,13 @@ def _write_record(record: dict) -> None:
 
 def promote_best_run(experiment_name: str, reg: RegistryConfig) -> dict:
     """Find the best run, register it and promote it; return the record."""
-    best = find_best_model_run(experiment_name, reg.metric, reg.ascending)
+    best = find_best_model_run(
+        experiment_name,
+        reg.metric,
+        reg.ascending,
+        reg.tiebreak_metric,
+        reg.tiebreak_ascending,
+    )
     version = register_model(best.info.run_id, reg.model_name, stage="Staging")
     promote_model(reg.model_name, version, stage=reg.stage)
     return {

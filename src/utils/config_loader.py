@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, Field, field_validator
@@ -172,6 +172,17 @@ class RegistryConfig(BaseModel):
     metric: str
     ascending: bool
     stage: str
+    tiebreak_metric: str | None = None
+    tiebreak_ascending: bool = True
+
+
+class TuningConfig(BaseModel):
+    """Hyperparameter search settings: CV scheme and per-Strategy grids."""
+
+    enabled: bool
+    cv_folds: int = Field(gt=1)
+    scoring: str
+    grid: dict[str, dict[str, list[Any]]]
 
 
 class ExperimentConfig(BaseModel):
@@ -185,6 +196,7 @@ class ExperimentConfig(BaseModel):
     model: ModelConfig
     artifacts: ArtifactConfig
     registry: RegistryConfig
+    tuning: TuningConfig
 
 
 @lru_cache(maxsize=8)
