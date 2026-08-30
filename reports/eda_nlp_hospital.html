@@ -1,0 +1,912 @@
+
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <title>Relatório de EDA — Abstracts Médicos</title>
+  <style>
+    body { font-family: Arial, sans-serif; line-height: 1.5; margin: 40px; color: #222; }
+    h1, h2 { color: #1f4e79; }
+    table { border-collapse: collapse; width: 100%; margin: 16px 0; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    th { background: #f2f5f7; }
+    img { max-width: 100%; height: auto; border: 1px solid #ddd; }
+    figure { margin: 20px 0; }
+    figcaption { font-size: 0.9em; color: #555; }
+    .note { background: #fff8e1; padding: 12px; border-left: 4px solid #d39e00; }
+    .key { background: #e8f4fd; padding: 12px; border-left: 4px solid #1f4e79; }
+  </style>
+</head>
+<body>
+  <h1>Relatório de Análise Exploratória — Classificação de Abstracts Médicos</h1>
+  <p class="note">Relatório exploratório. O dataset é composto por abstracts médicos públicos e deve ser tratado como proxy acadêmico, não como validação clínica.</p>
+
+  <h2>1. Contexto do dataset</h2>
+  <p>Origem: Medical Abstracts TC Corpus (Kaggle). A base contém abstracts médicos rotulados por condição.</p>
+  <table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>classe</th>
+      <th>registros</th>
+      <th>proporcao</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>general pathological conditions</td>
+      <td>4805</td>
+      <td>0.332802</td>
+    </tr>
+    <tr>
+      <td>neoplasms</td>
+      <td>3163</td>
+      <td>0.219075</td>
+    </tr>
+    <tr>
+      <td>cardiovascular diseases</td>
+      <td>3051</td>
+      <td>0.211317</td>
+    </tr>
+    <tr>
+      <td>nervous system diseases</td>
+      <td>1925</td>
+      <td>0.133329</td>
+    </tr>
+    <tr>
+      <td>digestive system diseases</td>
+      <td>1494</td>
+      <td>0.103477</td>
+    </tr>
+  </tbody>
+</table>
+  <figure><img src="figures/class_distribution.png" alt="Distribuição das classes"><figcaption>Distribuição das classes</figcaption></figure>
+
+  <h2>2. Problema de classificação</h2>
+  <p>A tarefa foi enunciada como classificação multiclasse, com uma condição por texto. A seção 4 deste relatório mostra por que essa formulação se sustenta apenas parcialmente.</p>
+
+  <h2>3. Qualidade dos dados</h2>
+  <table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>checagem</th>
+      <th>valor</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>linhas</td>
+      <td>14438</td>
+    </tr>
+    <tr>
+      <td>colunas</td>
+      <td>7</td>
+    </tr>
+    <tr>
+      <td>textos nulos</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <td>alvos nulos</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <td>textos vazios</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <td>textos muito curtos (&lt; 20 caracteres)</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <td>duplicidades totais (linha inteira)</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <td>duplicidades por texto</td>
+      <td>3211</td>
+    </tr>
+    <tr>
+      <td>duplicidades por texto e classe</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <td>classes sem nome após o merge</td>
+      <td>0</td>
+    </tr>
+  </tbody>
+</table>
+  <p>A base não tem nulos, vazios ou classes órfãs. A anomalia relevante está nas duplicidades: milhares de textos repetidos, mas <strong>zero</strong> pares (texto, classe) repetidos.</p>
+
+  <h2>4. Achado crítico: corpus multirrótulo achatado</h2>
+  <div class="key">
+    <p>O corpus é originalmente multirrótulo e foi distribuído em formato achatado — uma linha por par (abstract, condição).</p>
+    <ul>
+      <li><strong>26%</strong> dos abstracts únicos têm mais de um rótulo válido.</li>
+      <li><strong>35%</strong> das linhas do teste oficial reaproveitam um abstract do treino, sempre cobrando um rótulo diferente.</li>
+      <li>Teto teórico de F1-macro para modelos de rótulo único: <strong>0.7803</strong>.</li>
+    </ul>
+  </div>
+  <table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>rotulos_distintos_por_abstract</th>
+      <th>abstracts</th>
+      <th>percentual</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>1</td>
+      <td>8298</td>
+      <td>73.9</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td>2653</td>
+      <td>23.6</td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td>270</td>
+      <td>2.4</td>
+    </tr>
+    <tr>
+      <td>4</td>
+      <td>6</td>
+      <td>0.1</td>
+    </tr>
+  </tbody>
+</table>
+  <table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>rotulo_a</th>
+      <th>rotulo_b</th>
+      <th>abstracts_em_comum</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>cardiovascular diseases</td>
+      <td>general pathological conditions</td>
+      <td>870</td>
+    </tr>
+    <tr>
+      <td>general pathological conditions</td>
+      <td>neoplasms</td>
+      <td>619</td>
+    </tr>
+    <tr>
+      <td>digestive system diseases</td>
+      <td>general pathological conditions</td>
+      <td>603</td>
+    </tr>
+    <tr>
+      <td>general pathological conditions</td>
+      <td>nervous system diseases</td>
+      <td>591</td>
+    </tr>
+    <tr>
+      <td>digestive system diseases</td>
+      <td>neoplasms</td>
+      <td>204</td>
+    </tr>
+    <tr>
+      <td>cardiovascular diseases</td>
+      <td>nervous system diseases</td>
+      <td>197</td>
+    </tr>
+    <tr>
+      <td>neoplasms</td>
+      <td>nervous system diseases</td>
+      <td>190</td>
+    </tr>
+    <tr>
+      <td>cardiovascular diseases</td>
+      <td>neoplasms</td>
+      <td>101</td>
+    </tr>
+    <tr>
+      <td>cardiovascular diseases</td>
+      <td>digestive system diseases</td>
+      <td>68</td>
+    </tr>
+    <tr>
+      <td>digestive system diseases</td>
+      <td>nervous system diseases</td>
+      <td>56</td>
+    </tr>
+  </tbody>
+</table>
+  <table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>classe</th>
+      <th>abstracts</th>
+      <th>pct_tambem_com_outro_rotulo</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>digestive system diseases</td>
+      <td>1494</td>
+      <td>53.2</td>
+    </tr>
+    <tr>
+      <td>general pathological conditions</td>
+      <td>4805</td>
+      <td>50.2</td>
+    </tr>
+    <tr>
+      <td>nervous system diseases</td>
+      <td>1925</td>
+      <td>45.5</td>
+    </tr>
+    <tr>
+      <td>cardiovascular diseases</td>
+      <td>3051</td>
+      <td>35.7</td>
+    </tr>
+    <tr>
+      <td>neoplasms</td>
+      <td>3163</td>
+      <td>30.6</td>
+    </tr>
+  </tbody>
+</table>
+
+  <h2>5. Preparação dos dados</h2>
+  <p>Normalização unicode, minúsculas, remoção de pontuação, remoção de stopwords via NLTK e lematização com spaCy. Números foram preservados por poderem carregar informação clínica.</p>
+  <table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th></th>
+      <th>original_words</th>
+      <th>clean_words</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>count</th>
+      <td>6000.00</td>
+      <td>6000.00</td>
+    </tr>
+    <tr>
+      <th>mean</th>
+      <td>179.66</td>
+      <td>115.55</td>
+    </tr>
+    <tr>
+      <th>std</th>
+      <td>76.16</td>
+      <td>49.38</td>
+    </tr>
+    <tr>
+      <th>min</th>
+      <td>26.00</td>
+      <td>17.00</td>
+    </tr>
+    <tr>
+      <th>25%</th>
+      <td>122.00</td>
+      <td>78.00</td>
+    </tr>
+    <tr>
+      <th>50%</th>
+      <td>175.00</td>
+      <td>113.00</td>
+    </tr>
+    <tr>
+      <th>75%</th>
+      <td>234.00</td>
+      <td>150.25</td>
+    </tr>
+    <tr>
+      <th>max</th>
+      <td>528.00</td>
+      <td>340.00</td>
+    </tr>
+  </tbody>
+</table>
+  <figure><img src="figures/text_length_before_after.png" alt="Distribuição de tamanho antes e depois do pré-processamento"><figcaption>Distribuição de tamanho antes e depois do pré-processamento</figcaption></figure>
+
+  <h2>6. Gráficos e principais insights textuais</h2>
+  <figure><img src="figures/top_terms_overall.png" alt="Palavras mais frequentes após o pré-processamento"><figcaption>Palavras mais frequentes após o pré-processamento</figcaption></figure>
+  <table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>termo</th>
+      <th>frequencia</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>patient</td>
+      <td>16207</td>
+    </tr>
+    <tr>
+      <td>study</td>
+      <td>4064</td>
+    </tr>
+    <tr>
+      <td>group</td>
+      <td>3679</td>
+    </tr>
+    <tr>
+      <td>cell</td>
+      <td>3474</td>
+    </tr>
+    <tr>
+      <td>disease</td>
+      <td>3276</td>
+    </tr>
+    <tr>
+      <td>less</td>
+      <td>3018</td>
+    </tr>
+    <tr>
+      <td>year</td>
+      <td>2976</td>
+    </tr>
+    <tr>
+      <td>case</td>
+      <td>2869</td>
+    </tr>
+    <tr>
+      <td>use</td>
+      <td>2783</td>
+    </tr>
+    <tr>
+      <td>result</td>
+      <td>2569</td>
+    </tr>
+    <tr>
+      <td>increase</td>
+      <td>2557</td>
+    </tr>
+    <tr>
+      <td>treatment</td>
+      <td>2515</td>
+    </tr>
+    <tr>
+      <td>tumor</td>
+      <td>2362</td>
+    </tr>
+    <tr>
+      <td>two</td>
+      <td>2337</td>
+    </tr>
+    <tr>
+      <td>may</td>
+      <td>2144</td>
+    </tr>
+    <tr>
+      <td>one</td>
+      <td>2137</td>
+    </tr>
+    <tr>
+      <td>control</td>
+      <td>2096</td>
+    </tr>
+    <tr>
+      <td>high</td>
+      <td>2048</td>
+    </tr>
+    <tr>
+      <td>blood</td>
+      <td>1941</td>
+    </tr>
+    <tr>
+      <td>follow</td>
+      <td>1876</td>
+    </tr>
+  </tbody>
+</table>
+  <figure><img src="figures/wordcloud_cardiovascular_diseases.png" alt="Wordcloud - cardiovascular diseases"><figcaption>Wordcloud - cardiovascular diseases</figcaption></figure>
+<figure><img src="figures/wordcloud_general_pathological_conditions.png" alt="Wordcloud - general pathological conditions"><figcaption>Wordcloud - general pathological conditions</figcaption></figure>
+<figure><img src="figures/wordcloud_neoplasms.png" alt="Wordcloud - neoplasms"><figcaption>Wordcloud - neoplasms</figcaption></figure>
+
+  <h2>7. Vocabulário e implicações para a vetorização</h2>
+  <table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>metrica</th>
+      <th>valor</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Tokens totais</td>
+      <td>693,314</td>
+    </tr>
+    <tr>
+      <td>Vocabulário (tokens únicos)</td>
+      <td>23,720</td>
+    </tr>
+    <tr>
+      <td>Type-token ratio</td>
+      <td>0.0342</td>
+    </tr>
+    <tr>
+      <td>Hapax legomena (frequência 1)</td>
+      <td>6,805 (28.7%)</td>
+    </tr>
+    <tr>
+      <td>Tokens por documento (mediana)</td>
+      <td>113</td>
+    </tr>
+  </tbody>
+</table>
+  <table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>top_n_termos</th>
+      <th>cobertura_do_corpus</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>1000</td>
+      <td>0.6448</td>
+    </tr>
+    <tr>
+      <td>3000</td>
+      <td>0.8394</td>
+    </tr>
+    <tr>
+      <td>5000</td>
+      <td>0.9037</td>
+    </tr>
+    <tr>
+      <td>10000</td>
+      <td>0.9629</td>
+    </tr>
+    <tr>
+      <td>20000</td>
+      <td>0.9946</td>
+    </tr>
+  </tbody>
+</table>
+  <figure><img src="figures/vocabulary_coverage.png" alt="Distribuição de frequência e cobertura acumulada do vocabulário"><figcaption>Distribuição de frequência e cobertura acumulada do vocabulário</figcaption></figure>
+  <p>Os 5.000 termos mais frequentes cobrem cerca de 90% do corpus, validando empiricamente o <code>max_features=5000</code> do pipeline de produção.</p>
+  <h3>Termos distintivos por classe (lift)</h3>
+  <table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>classe</th>
+      <th>termo</th>
+      <th>freq_na_classe</th>
+      <th>lift</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>cardiovascular diseases</td>
+      <td>chd</td>
+      <td>36</td>
+      <td>4.24</td>
+    </tr>
+    <tr>
+      <td>cardiovascular diseases</td>
+      <td>doxazosin</td>
+      <td>51</td>
+      <td>4.24</td>
+    </tr>
+    <tr>
+      <td>cardiovascular diseases</td>
+      <td>sestamibi</td>
+      <td>26</td>
+      <td>4.24</td>
+    </tr>
+    <tr>
+      <td>cardiovascular diseases</td>
+      <td>chf</td>
+      <td>44</td>
+      <td>4.15</td>
+    </tr>
+    <tr>
+      <td>cardiovascular diseases</td>
+      <td>reinjection</td>
+      <td>34</td>
+      <td>4.12</td>
+    </tr>
+    <tr>
+      <td>cardiovascular diseases</td>
+      <td>dahl</td>
+      <td>30</td>
+      <td>4.10</td>
+    </tr>
+    <tr>
+      <td>cardiovascular diseases</td>
+      <td>atenolol</td>
+      <td>33</td>
+      <td>4.00</td>
+    </tr>
+    <tr>
+      <td>cardiovascular diseases</td>
+      <td>enalapril</td>
+      <td>42</td>
+      <td>3.96</td>
+    </tr>
+    <tr>
+      <td>digestive system diseases</td>
+      <td>dissolution</td>
+      <td>30</td>
+      <td>9.69</td>
+    </tr>
+    <tr>
+      <td>digestive system diseases</td>
+      <td>capd</td>
+      <td>33</td>
+      <td>9.41</td>
+    </tr>
+    <tr>
+      <td>digestive system diseases</td>
+      <td>gallstone</td>
+      <td>84</td>
+      <td>8.31</td>
+    </tr>
+    <tr>
+      <td>digestive system diseases</td>
+      <td>omeprazole</td>
+      <td>31</td>
+      <td>7.33</td>
+    </tr>
+    <tr>
+      <td>digestive system diseases</td>
+      <td>dysphagia</td>
+      <td>48</td>
+      <td>7.27</td>
+    </tr>
+    <tr>
+      <td>digestive system diseases</td>
+      <td>anorectal</td>
+      <td>26</td>
+      <td>7.00</td>
+    </tr>
+    <tr>
+      <td>digestive system diseases</td>
+      <td>colitis</td>
+      <td>97</td>
+      <td>6.91</td>
+    </tr>
+    <tr>
+      <td>digestive system diseases</td>
+      <td>peritonitis</td>
+      <td>83</td>
+      <td>6.82</td>
+    </tr>
+    <tr>
+      <td>general pathological conditions</td>
+      <td>src</td>
+      <td>47</td>
+      <td>3.07</td>
+    </tr>
+    <tr>
+      <td>general pathological conditions</td>
+      <td>oxy</td>
+      <td>26</td>
+      <td>3.07</td>
+    </tr>
+    <tr>
+      <td>general pathological conditions</td>
+      <td>iddm</td>
+      <td>25</td>
+      <td>2.74</td>
+    </tr>
+    <tr>
+      <td>general pathological conditions</td>
+      <td>osteomyelitis</td>
+      <td>34</td>
+      <td>2.74</td>
+    </tr>
+    <tr>
+      <td>general pathological conditions</td>
+      <td>exon</td>
+      <td>31</td>
+      <td>2.72</td>
+    </tr>
+    <tr>
+      <td>general pathological conditions</td>
+      <td>cesarean</td>
+      <td>36</td>
+      <td>2.69</td>
+    </tr>
+    <tr>
+      <td>general pathological conditions</td>
+      <td>mutant</td>
+      <td>43</td>
+      <td>2.69</td>
+    </tr>
+    <tr>
+      <td>general pathological conditions</td>
+      <td>pneumothorax</td>
+      <td>31</td>
+      <td>2.64</td>
+    </tr>
+    <tr>
+      <td>neoplasms</td>
+      <td>bm</td>
+      <td>28</td>
+      <td>4.66</td>
+    </tr>
+    <tr>
+      <td>neoplasms</td>
+      <td>scc</td>
+      <td>40</td>
+      <td>4.66</td>
+    </tr>
+    <tr>
+      <td>neoplasms</td>
+      <td>mammography</td>
+      <td>51</td>
+      <td>4.66</td>
+    </tr>
+    <tr>
+      <td>neoplasms</td>
+      <td>b72</td>
+      <td>28</td>
+      <td>4.66</td>
+    </tr>
+    <tr>
+      <td>neoplasms</td>
+      <td>psa</td>
+      <td>47</td>
+      <td>4.66</td>
+    </tr>
+    <tr>
+      <td>neoplasms</td>
+      <td>carcinomas</td>
+      <td>31</td>
+      <td>4.51</td>
+    </tr>
+    <tr>
+      <td>neoplasms</td>
+      <td>mammographic</td>
+      <td>34</td>
+      <td>4.40</td>
+    </tr>
+    <tr>
+      <td>neoplasms</td>
+      <td>lak</td>
+      <td>29</td>
+      <td>4.36</td>
+    </tr>
+    <tr>
+      <td>nervous system diseases</td>
+      <td>spasticity</td>
+      <td>29</td>
+      <td>8.04</td>
+    </tr>
+    <tr>
+      <td>nervous system diseases</td>
+      <td>tourette</td>
+      <td>26</td>
+      <td>7.72</td>
+    </tr>
+    <tr>
+      <td>nervous system diseases</td>
+      <td>aphasia</td>
+      <td>25</td>
+      <td>7.17</td>
+    </tr>
+    <tr>
+      <td>nervous system diseases</td>
+      <td>achr</td>
+      <td>25</td>
+      <td>7.17</td>
+    </tr>
+    <tr>
+      <td>nervous system diseases</td>
+      <td>migraine</td>
+      <td>99</td>
+      <td>6.05</td>
+    </tr>
+    <tr>
+      <td>nervous system diseases</td>
+      <td>movement</td>
+      <td>110</td>
+      <td>6.02</td>
+    </tr>
+    <tr>
+      <td>nervous system diseases</td>
+      <td>cognitive</td>
+      <td>62</td>
+      <td>5.66</td>
+    </tr>
+    <tr>
+      <td>nervous system diseases</td>
+      <td>meningitis</td>
+      <td>68</td>
+      <td>5.60</td>
+    </tr>
+  </tbody>
+</table>
+  <h3>Bigramas de maior peso</h3>
+  <table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>bigrama</th>
+      <th>peso_tfidf</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>year old</td>
+      <td>76.342107</td>
+    </tr>
+    <tr>
+      <td>blood pressure</td>
+      <td>71.952191</td>
+    </tr>
+    <tr>
+      <td>long term</td>
+      <td>71.669983</td>
+    </tr>
+    <tr>
+      <td>less 05</td>
+      <td>63.854504</td>
+    </tr>
+    <tr>
+      <td>coronary artery</td>
+      <td>63.078059</td>
+    </tr>
+    <tr>
+      <td>per cent</td>
+      <td>62.209883</td>
+    </tr>
+    <tr>
+      <td>patient undergo</td>
+      <td>61.747795</td>
+    </tr>
+    <tr>
+      <td>case report</td>
+      <td>58.506062</td>
+    </tr>
+    <tr>
+      <td>report case</td>
+      <td>56.760210</td>
+    </tr>
+    <tr>
+      <td>two patient</td>
+      <td>51.537473</td>
+    </tr>
+    <tr>
+      <td>risk factor</td>
+      <td>50.078598</td>
+    </tr>
+    <tr>
+      <td>one patient</td>
+      <td>49.206368</td>
+    </tr>
+    <tr>
+      <td>less 001</td>
+      <td>48.077024</td>
+    </tr>
+    <tr>
+      <td>magnetic resonance</td>
+      <td>46.961827</td>
+    </tr>
+    <tr>
+      <td>cell carcinoma</td>
+      <td>46.788322</td>
+    </tr>
+  </tbody>
+</table>
+
+  <h2>8. Sobreposição entre classes</h2>
+  <figure><img src="figures/class_centroid_similarity.png" alt="Similaridade do cosseno entre centroides TF-IDF das classes"><figcaption>Similaridade do cosseno entre centroides TF-IDF das classes</figcaption></figure>
+  <p>Similaridade média entre classes distintas: <strong>0.733</strong>. As classes não são lexicalmente disjuntas, o que confirma pelo conteúdo o que a seção 4 mostrou pela estrutura dos rótulos.</p>
+  <figure><img src="figures/text_length_by_class.png" alt="Distribuição do tamanho dos abstracts por classe"><figcaption>Distribuição do tamanho dos abstracts por classe</figcaption></figure>
+
+  <h2>9. Comparabilidade dos splits oficiais</h2>
+  <table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>source_split</th>
+      <th>condition_name</th>
+      <th>kaggle_test</th>
+      <th>kaggle_train</th>
+      <th>diferenca_pp</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th></th>
+      <td>cardiovascular diseases</td>
+      <td>0.2112</td>
+      <td>0.2113</td>
+      <td>-0.01</td>
+    </tr>
+    <tr>
+      <th></th>
+      <td>digestive system diseases</td>
+      <td>0.1035</td>
+      <td>0.1035</td>
+      <td>0.00</td>
+    </tr>
+    <tr>
+      <th></th>
+      <td>general pathological conditions</td>
+      <td>0.3328</td>
+      <td>0.3328</td>
+      <td>0.00</td>
+    </tr>
+    <tr>
+      <th></th>
+      <td>neoplasms</td>
+      <td>0.2192</td>
+      <td>0.2190</td>
+      <td>0.02</td>
+    </tr>
+    <tr>
+      <th></th>
+      <td>nervous system diseases</td>
+      <td>0.1333</td>
+      <td>0.1333</td>
+      <td>0.00</td>
+    </tr>
+  </tbody>
+</table>
+  <p>Treino e teste oficiais são estatisticamente equivalentes; não há drift de distribuição a corrigir.</p>
+
+  <h2>10. Bibliotecas usadas no desenvolvimento</h2>
+  <table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>biblioteca</th>
+      <th>versao</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>python</td>
+      <td>3.11</td>
+    </tr>
+    <tr>
+      <td>pandas</td>
+      <td>3.0.5</td>
+    </tr>
+    <tr>
+      <td>numpy</td>
+      <td>2.4.6</td>
+    </tr>
+    <tr>
+      <td>scikit-learn</td>
+      <td>1.7.2</td>
+    </tr>
+    <tr>
+      <td>matplotlib</td>
+      <td>3.11.1</td>
+    </tr>
+    <tr>
+      <td>seaborn</td>
+      <td>0.13.2</td>
+    </tr>
+    <tr>
+      <td>nltk</td>
+      <td>3.10.3</td>
+    </tr>
+    <tr>
+      <td>spaCy</td>
+      <td>3.8.16</td>
+    </tr>
+    <tr>
+      <td>spaCy model</td>
+      <td>en_core_web_sm</td>
+    </tr>
+  </tbody>
+</table>
+
+  <h2>11. Privacidade e dados sensíveis</h2>
+  <p>O notebook evita exibir textos completos em massa e usa exemplos truncados. Em dados reais de hospital, seriam necessários mascaramento de informações sensíveis, controle de acesso, revisão jurídica e validação clínica antes de qualquer uso operacional.</p>
+
+  <h2>12. Limitações</h2>
+  <ul>
+    <li>A etapa de pré-processamento textual usa amostra estratificada de 6,000 registros; a análise estrutural usa o corpus completo.</li>
+    <li>Dataset em inglês, baseado em abstracts científicos, não em fluxo real de triagem hospitalar.</li>
+    <li>O teto teórico de 0.78 limita o que qualquer modelo de rótulo único pode atingir neste benchmark.</li>
+    <li>Modelagem e avaliação de modelos estão no notebook 02_baseline_modelagem.ipynb.</li>
+  </ul>
+</body>
+</html>
