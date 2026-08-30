@@ -1,5 +1,14 @@
 # SPEC - Notebook de EDA e Baseline para Classificacao de Textos Hospitalares
 
+> **Nota de implementacao.** Esta spec descreve as secoes originalmente
+> previstas para um unico notebook. Na implementacao final elas foram
+> divididas em dois notebooks autocontidos: `notebooks/01_eda_nlp_hospital.ipynb`
+> cobre as secoes 6.1 a 6.10 (EDA pura, sem modelagem), e
+> `notebooks/02_baseline_modelagem.ipynb` cobre as secoes 6.11 a 6.16
+> (separacao treino/teste, modelagem, avaliacao, arquitetura teorica e
+> relatorio). A separacao evita misturar analise exploratoria com treino e
+> avaliacao de modelos no mesmo artefato.
+
 ## 1. Objetivo
 
 Construir um Jupyter Notebook autocontido para realizar uma analise exploratoria inicial dos dados, identificar necessidades de preprocessamento textual e elaborar uma arquitetura teorica inicial para um MVP de classificacao de textos usando NLP.

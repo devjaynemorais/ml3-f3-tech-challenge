@@ -34,7 +34,9 @@ priorização, não um diagnóstico clínico nem substituto de revisão humana.
   dataset real.
 - `docs/specs/spec_notebook_eda_nlp_hospital.md`: especificação do notebook
   exploratório, separada do pipeline de produção.
-- `notebooks/01_eda_baseline_nlp_hospital.ipynb`: EDA e baseline autocontidos.
+- `notebooks/01_eda_nlp_hospital.ipynb`: EDA autocontida, sem modelagem.
+- `notebooks/02_baseline_modelagem.ipynb`: modelagem e avaliação de baselines,
+  autocontido, consumindo os achados do notebook 01.
 - `config/config.yaml`: configuração de experimento, dados, labels, split,
   features, modelo e nomes de artefatos.
 - `.env.example`: configuração de runtime da API e dos serviços locais.
