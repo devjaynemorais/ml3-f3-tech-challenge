@@ -92,3 +92,18 @@ def test_duplicate_or_missing_artifact_classes_are_rejected() -> None:
 def test_load_predictor_rejects_unknown_backend() -> None:
     with pytest.raises(ValueError, match="unknown model backend"):
         model_loader.load_predictor(backend="tensorflow")
+
+
+def test_sklearn_explain_exposes_preprocessing_and_top_terms() -> None:
+    predictor = model_loader.SklearnPredictor(_fitted_pipeline(), CANONICAL_LABELS)
+
+    result = predictor.explain("Class2 Abstract Sample")
+
+    assert result["label"] in CANONICAL_LABELS
+    assert result["backend"] == "sklearn"
+    assert result["preprocessed_text"] == "class2 abstract sample"
+    assert result["top_terms"], "linear model over TF-IDF must expose top terms"
+    top_term = result["top_terms"][0]
+    assert {"term", "tfidf", "weight", "contribution"} == set(top_term)
+    contributions = [term["contribution"] for term in result["top_terms"]]
+    assert contributions == sorted(contributions, reverse=True)

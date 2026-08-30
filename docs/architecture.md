@@ -63,7 +63,8 @@ artefato com classes diferentes das cinco classes canônicas é rejeitado.
 O `Dockerfile` preserva os stages:
 
 - `builder`: instala dependências, stopwords NLTK e `en_core_web_sm 3.8.0`;
-- `train`: executa preparação, treino, avaliação, exportação e benchmark;
+- `train`: fornece o runtime para executar, separadamente, preparação, treino,
+  avaliação, exportação e benchmark; o comando padrão executa somente treino;
 - `api`: contém o runtime de serving e reutiliza o ambiente do builder.
 
 Os recursos NLP são instalados no build, nunca durante a primeira predição.

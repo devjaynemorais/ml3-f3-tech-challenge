@@ -43,6 +43,10 @@ Detalhes e decisões estão em [docs/architecture.md](docs/architecture.md) e as
 limitações do modelo em [docs/model_card.md](docs/model_card.md). O
 diagnóstico completo do teto de F1 do corpus e as propostas de melhoria
 avaliadas estão em [docs/plano_melhoria_f1.md](docs/plano_melhoria_f1.md).
+A comparação reproduzível dos quatro experimentos oficiais está em
+[docs/metodologia_experimentos.md](docs/metodologia_experimentos.md). O de/para
+completo do enunciado está em
+[docs/checklist_requisitos_tce3.md](docs/checklist_requisitos_tce3.md).
 
 ## Decisão de deploy em nuvem
 
@@ -77,7 +81,19 @@ tests/                              testes unitários, integração e arquitetur
 
 ## Dataset
 
-Use os três arquivos do Medical Abstracts TC Corpus:
+O projeto usa a versão processada do **Medical Abstracts Text Classification
+Corpus**, publicada por Schopf, Braun e Matthes. A fonte canônica é o
+[repositório dos autores](https://github.com/sebischair/Medical-Abstracts-TC-Corpus),
+também espelhado no
+[Kaggle](https://www.kaggle.com/datasets/saharalaa/medical-abstracts-tc-corpus).
+Essa versão contém 14.438 linhas rotuladas em inglês: 11.550 no treino oficial
+e 2.888 no teste oficial, distribuídas em cinco categorias. O corpus processado
+é disponibilizado sob **Creative Commons CC BY-SA 3.0**; redistribuições e
+trabalhos derivados devem preservar atribuição e compartilhamento pela mesma
+licença. A referência acadêmica é Schopf, Braun e Matthes (NLPIR 2022/ACM 2023),
+DOI [`10.1145/3582768.3582795`](https://doi.org/10.1145/3582768.3582795).
+
+Use os três arquivos:
 
 ```text
 data/raw/medical_tc_train.csv
@@ -97,8 +113,10 @@ data/processed/test.csv
 ```
 
 O teste oficial permanece integral e nunca participa do fit. Dados, modelos e
-métricas gerados ficam fora do Git. Verifique licença e termos da fonte antes de
-redistribuir o corpus.
+métricas gerados ficam fora do Git. Como o corpus original repete alguns
+abstracts sob rótulos diferentes, as 14.438 linhas correspondem a 11.227 textos
+únicos; essa estrutura multirrótulo achatada e seus efeitos nas métricas estão
+documentados no model card e na metodologia dos experimentos.
 
 ## Início rápido
 
@@ -119,6 +137,14 @@ make api
 Windows, quando `make` não estiver disponível, use o interpretador da `.venv`
 com os módulos indicados nos targets do Makefile.
 
+Para reproduzir o experimento BERT, instale também o grupo opcional pesado e
+execute o target dedicado:
+
+```bash
+make install-experiments
+make finetune-bert
+```
+
 Depois de iniciar a API, abra `http://localhost:8000/docs`.
 
 ## API
@@ -130,6 +156,9 @@ Depois de iniciar a API, abra `http://localhost:8000/docs`.
 | POST | `/predict` | recebe `text` e retorna `label`, cinco `scores` e `backend` |
 | GET | `/metrics` | métricas Prometheus |
 | GET | `/docs` | Swagger UI |
+| GET | `/explain?text=...` | mesma coisa, mas com o passo a passo (pré-processamento real, termos TF-IDF que mais pesaram) — usado pela demo abaixo |
+| GET | `/demo` | página HTML da demo interativa |
+| GET | `/demo/sample-texts` | 5 abstracts reais de exemplo, um por categoria canônica |
 
 Exemplo:
 
@@ -145,6 +174,17 @@ incluídos nos logs.
 
 A coleção [postman/Triage-API.postman_collection.json](postman/Triage-API.postman_collection.json)
 contém todos os GETs e cinco exemplos sintéticos de predição.
+
+### Demo interativa
+
+Com um modelo treinado (`make train`), rode `make demo` (atalho para `make api`
+que já imprime a URL) e abra **`http://localhost:8000/demo`**: uma
+página que chama o mesmo `TriagePredictor` Production de verdade (via
+`/explain`, a mesma lógica de `/predict` com o passo a passo exposto —
+pré-processamento real do texto, termos TF-IDF que mais pesaram para a
+categoria prevista, ranking entre as 5 categorias) e narra as 6 etapas do
+`Makefile` que rodaram offline antes disso. Serve tanto pra mostrar o projeto
+funcionando quanto de roteiro visual pro vídeo STAR.
 
 ## Docker e observabilidade
 
@@ -202,13 +242,13 @@ containerizado usa `mlflow-data/` — são históricos independentes.
 
 ### Model Registry
 
-Depois de `make train` + `make evaluate` (idealmente rodado uma vez por
-Strategy — `logistic_regression`, `random_forest`, `gradient_boosting` — para
-ter runs comparáveis), `make promote` busca no experimento o run com melhor
-`registry.metric` (padrão: `validation_macro_f1`, configurável em
-`config/config.yaml`; validação, não teste, para não enviesar a escolha pelo
-conjunto de teste oficial), registra o artefato no MLflow Model Registry e
-promove para `registry.stage` (padrão `Production`). O resultado fica em
+Depois de `make train` + `make evaluate`, `make promote` busca no experimento o
+run com melhor `registry.metric` (padrão: `cv_macro_f1_mean`, configurável em
+`config/config.yaml`) e desempata pelo menor `cv_macro_f1_std`. A seleção usa
+CV estratificada de 3 folds sobre treino+validação e nunca usa o teste oficial,
+evitando promover um modelo por desempenho observado no teste. O comando
+registra o artefato no MLflow Model Registry e promove para `registry.stage`
+(padrão `Production`). O resultado fica em
 `models/promoted_model.json` (fora do Git) e na aba **Models** da UI do
 MLflow.
 
@@ -235,6 +275,12 @@ classificador: preprocessing, TF-IDF e, quando aplicável, seleção/conversão 
 features. Apenas o classificador final é convertido para ONNX. O benchmark usa
 o mesmo contrato `TriagePredictor` nos dois backends e grava
 `metrics/latency_comparison.json`.
+
+No benchmark oficial local, com 5 warm-ups e 200 predições unitárias do mesmo
+texto sintético, o pipeline sklearn levou **4,14 ms/texto** em média e o backend
+ONNX **3,37 ms/texto**. Isso representa speedup de **1,228x** e redução média de
+latência de **18,5%**. Os valores são dependentes do hardware; o comando abaixo
+reproduz a comparação no ambiente corrente.
 
 Defina `MODEL_BACKEND=onnx` no `.env` para servir o backend otimizado depois de
 executar `make export-onnx`.

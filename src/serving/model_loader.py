@@ -29,6 +29,10 @@ class TriagePredictor(Protocol):
         """Return predicted label and probability per canonical class."""
         ...
 
+    def explain(self, text: str) -> dict:
+        """Return predict() fields plus the real preprocessing/attribution steps."""
+        ...
+
 
 def _ordered_scores(
     probabilities: np.ndarray,
@@ -43,6 +47,47 @@ def _ordered_scores(
 def _label_from_scores(scores: dict[str, float]) -> str:
     """Return the highest-probability class."""
     return max(scores, key=scores.__getitem__)
+
+
+def _ranked_terms(
+    vector: sparse.spmatrix, weights: np.ndarray, names: np.ndarray, top_n: int
+) -> list[dict]:
+    """Rank the text's non-zero TF-IDF terms by contribution to the class score."""
+    terms = [
+        {
+            "term": str(names[index]),
+            "tfidf": float(vector[0, index]),
+            "weight": float(weights[index]),
+            "contribution": float(vector[0, index] * weights[index]),
+        }
+        for index in vector.nonzero()[1]
+    ]
+    terms.sort(key=lambda term: term["contribution"], reverse=True)
+    return terms[:top_n]
+
+
+def _term_contributions(
+    vectorizer: object,
+    classifier: object,
+    preprocessed_text: str,
+    label: str,
+    top_n: int,
+) -> list[dict] | None:
+    """Explain a prediction via TF-IDF weight times linear-model coefficient.
+
+    Returns ``None`` when the classifier has no ``coef_`` (e.g. tree ensembles),
+    since term-level attribution only holds for linear decision functions.
+    """
+    coefficients = getattr(classifier, "coef_", None)
+    if coefficients is None or not hasattr(vectorizer, "get_feature_names_out"):
+        return None
+    vector = vectorizer.transform([preprocessed_text])
+    class_index = list(classifier.classes_).index(label)
+    weights = (
+        coefficients[class_index] if coefficients.shape[0] > 1 else coefficients[0]
+    )
+    names = vectorizer.get_feature_names_out()
+    return _ranked_terms(vector, weights, names, top_n)
 
 
 class SklearnPredictor:
@@ -64,6 +109,25 @@ class SklearnPredictor:
             probabilities, self._probability_classes, self._expected_classes
         )
         return _label_from_scores(scores), scores
+
+    def explain(self, text: str, top_n: int = 12) -> dict:
+        """Predict and expose the real preprocessed text and term attribution."""
+        label, scores = self.predict(text)
+        preprocessed = self._pipeline.named_steps["preprocessor"].transform([text])[0]
+        vectorizer = self._pipeline.named_steps.get("tfidf")
+        top_terms = None
+        if vectorizer is not None:
+            classifier = self._pipeline.named_steps["classifier"]
+            top_terms = _term_contributions(
+                vectorizer, classifier, preprocessed, label, top_n
+            )
+        return {
+            "label": label,
+            "scores": scores,
+            "backend": self.backend,
+            "preprocessed_text": preprocessed,
+            "top_terms": top_terms,
+        }
 
 
 class OnnxPredictor:
@@ -98,6 +162,24 @@ class OnnxPredictor:
             probabilities, self._probability_classes, self._expected_classes
         )
         return _label_from_scores(scores), scores
+
+    def explain(self, text: str) -> dict:
+        """Predict and expose the real preprocessed text.
+
+        Term attribution is unavailable on this backend: the classifier runs
+        inside the ONNX graph, not as an inspectable sklearn estimator.
+        """
+        label, scores = self.predict(text)
+        preprocessed = self._feature_pipeline.named_steps["preprocessor"].transform(
+            [text]
+        )[0]
+        return {
+            "label": label,
+            "scores": scores,
+            "backend": self.backend,
+            "preprocessed_text": preprocessed,
+            "top_terms": None,
+        }
 
 
 def _load_sklearn_predictor(config: ExperimentConfig) -> SklearnPredictor:

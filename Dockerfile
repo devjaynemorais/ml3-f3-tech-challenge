@@ -14,7 +14,7 @@ COPY pyproject.toml poetry.lock* ./
 
 RUN poetry install --only main --no-root && rm -rf "${POETRY_CACHE_DIR}"
 
-ARG SPACY_MODEL_URL=https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
+ARG SPACY_MODEL_URL=https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl
 ARG SCISPACY_MODEL_URL=https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.5.4/en_core_sci_md-0.5.4.tar.gz
 RUN .venv/bin/python -m nltk.downloader -d /app/.venv/nltk_data stopwords \
     && .venv/bin/python -m pip install --no-cache-dir "${SPACY_MODEL_URL}" "${SCISPACY_MODEL_URL}"
@@ -55,6 +55,7 @@ WORKDIR /app
 COPY --from=builder /app/.venv /app/.venv
 COPY src/ src/
 COPY config/ config/
+COPY metrics/experiment_comparison.json metrics/experiment_comparison.json
 
 ENV PATH="/app/.venv/bin:$PATH" \
     NLTK_DATA=/app/.venv/nltk_data \

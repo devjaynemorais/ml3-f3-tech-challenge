@@ -2,7 +2,7 @@
 # Uso:
 #   docker compose up --build            # sobe api + prometheus + grafana + mlflow
 #   docker compose run --rm train        # treina o modelo (perfil "train")
-#   docker compose run --rm train python -m src.optimization.export_onnx
+#   docker compose run --rm train src.optimization.export_onnx
 services:
   api:
     build:
@@ -14,6 +14,7 @@ services:
     env_file: .env
     volumes:
       - ./models:/app/models:ro
+      - ./metrics:/app/metrics:ro
     networks:
       - ml-network
     healthcheck:
@@ -35,6 +36,7 @@ services:
       - ./data:/app/data
       - ./models:/app/models
       - ./metrics:/app/metrics
+      - ./mlflow-data:/mlflow-data
     networks:
       - ml-network
     depends_on:
