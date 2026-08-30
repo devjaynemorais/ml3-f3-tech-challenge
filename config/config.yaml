@@ -39,7 +39,7 @@ preprocessing:
   preserve_numbers: true
 
 features:
-  type: embeddings  # tfidf | embeddings
+  type: tfidf  # tfidf | embeddings
   max_features: 5000
   ngram_range: [1, 2]
   min_df: 2
@@ -54,13 +54,13 @@ model:
     C: 0.3  # vencedor da busca CV (docs/model_card.md)
     max_iter: 1000
     class_weight: balanced
-    n_jobs: -1
+    n_jobs: 1  # evita explosao de processos/memoria em Windows e CI
     random_state: 42
   random_forest:
     n_estimators: 160
     max_depth: null
     class_weight: balanced
-    n_jobs: -1
+    n_jobs: 1
     random_state: 42
   gradient_boosting:
     n_estimators: 80
@@ -92,7 +92,7 @@ artifacts:
 
 registry:
   model_name: medical_text_classifier
-  # cv_macro_f1_mean (5-fold sobre treino+validacao) em vez de uma metrica de
+  # cv_macro_f1_mean (3-fold sobre treino+validacao) em vez de uma metrica de
   # split unico: com 1.155 linhas de validacao, diferencas < 0.015 sao ruido
   # (ver docs/plano_melhoria_f1.md, secao 3.6). Desempate por menor desvio
   # entre folds (modelo mais estavel).
@@ -109,11 +109,9 @@ tuning:
   grid:
     # tfidf fora da grade: o plano ja mediu que max_features=5000/ngram=1-2
     # (config atual) e o melhor ponto (variacao de so 0.027 no espaco todo).
+    # linear_svm e complement_nb saíram da grade: nao fazem mais parte dos 4
+    # experimentos oficiais (docs/metodologia_experimentos.md); resultados
+    # tunados de ambos continuam registrados em docs/model_card.md.
     logistic_regression:
       C: [0.1, 0.3, 1.0]
       class_weight: [balanced]
-    linear_svm:
-      C: [0.05, 0.1, 0.3]
-      class_weight: [balanced]
-    complement_nb:
-      alpha: [0.5, 1.0, 2.0]

@@ -67,7 +67,7 @@ def test_logistic_regression_strategy_uses_configured_parameters() -> None:
     assert [name for name, _ in steps] == ["classifier"]
     assert steps[0][1].get_params()["C"] == 0.3
     assert steps[0][1].get_params()["class_weight"] == "balanced"
-    assert steps[0][1].get_params()["n_jobs"] == -1
+    assert steps[0][1].get_params()["n_jobs"] == 1
 
 
 def test_random_forest_strategy_uses_configured_parameters() -> None:

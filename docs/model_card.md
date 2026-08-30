@@ -17,15 +17,25 @@ clínica e não substitui profissionais de saúde.
 ## Dados
 
 O pipeline espera os arquivos `medical_tc_train.csv`, `medical_tc_test.csv` e
-`medical_tc_labels.csv` do Medical Abstracts TC Corpus. Os textos são abstracts
-públicos em inglês; não são prontuários do projeto e não devem conter
-identificadores de pacientes.
+`medical_tc_labels.csv` do Medical Abstracts Text Classification Corpus,
+publicado por Schopf, Braun e Matthes no
+[repositório dos autores](https://github.com/sebischair/Medical-Abstracts-TC-Corpus)
+e espelhado no
+[Kaggle](https://www.kaggle.com/datasets/saharalaa/medical-abstracts-tc-corpus).
+São 14.438 linhas rotuladas em inglês (11.550 no treino oficial e 2.888 no
+teste), correspondentes a 11.227 abstracts únicos. Os textos são abstracts
+públicos; não são prontuários do projeto e não devem conter identificadores de
+pacientes.
+
+O corpus processado é distribuído sob **CC BY-SA 3.0**. O uso deve atribuir os
+autores e preservar a mesma licença em redistribuições ou derivados. Referência:
+Schopf, Braun e Matthes, *Evaluating Unsupervised Text Classification:
+Zero-Shot and Similarity-Based Approaches*, DOI
+[`10.1145/3582768.3582795`](https://doi.org/10.1145/3582768.3582795).
 
 O treino oficial é dividido de forma estratificada em 90% para fit e 10% para
 validação, usando `random_state=42`. O teste oficial permanece integral e é
-avaliado somente depois do treino. A origem, versão, quantidade final de linhas,
-licença e eventuais restrições de redistribuição devem ser confirmadas na fonte
-do corpus antes de publicar uma entrega.
+avaliado somente depois do treino.
 
 ## Preprocessing e features
 
@@ -97,6 +107,10 @@ Resultado da comparação (3-fold CV sobre treino+validação, grade reduzida:
 | **Logistic Regression (C=0.3)** | **0.6165 ± 0.0023** | **0.6169** | **0.735** |
 | Complement NB (alpha=2.0) | 0.6067 ± 0.0048 | 0.6070 | 0.660 |
 | Linear SVM calibrado (C=0.05) | 0.5963 ± 0.0095 | 0.6064 | 0.512 |
+
+Comparação estendida (incluindo modelo não-linear, features de embeddings e
+fine-tuning de BERT genérico), com o racional de escolha e exclusão de cada
+candidato, em `docs/metodologia_experimentos.md`.
 
 ## Avaliação
 

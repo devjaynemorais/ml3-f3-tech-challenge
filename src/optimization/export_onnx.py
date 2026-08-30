@@ -4,17 +4,20 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import joblib
+import mlflow
 from skl2onnx import convert_sklearn
 from skl2onnx.common.data_types import FloatTensorType
 from sklearn.pipeline import Pipeline
 
 from src.models.artifact_contract import validate_artifact_classes
-from src.models.registry import load_pipeline
+from src.models.registry import load_metadata, load_pipeline
 from src.utils.config_loader import ArtifactConfig, load_config
 
 if TYPE_CHECKING:
@@ -79,6 +82,23 @@ def export_pipeline_artifacts(
     return paths
 
 
+def log_onnx_artifacts_to_mlflow(run_id: str, paths: OnnxArtifactPaths) -> None:
+    """Attach the exported ONNX serving artifacts to the training's MLflow run."""
+    tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5000")
+    if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    try:
+        mlflow.set_tracking_uri(tracking_uri)
+        with mlflow.start_run(run_id=run_id):
+            for path in (paths.model, paths.feature_pipeline, paths.classes):
+                mlflow.log_artifact(str(path), artifact_path="onnx")
+    except Exception:
+        logger.warning(
+            "MLflow tracking unavailable at %s; skipping ONNX artifact log",
+            tracking_uri,
+        )
+
+
 def main() -> None:
     """Load the fitted pipeline and write every ONNX serving artifact."""
     config = load_config()
@@ -89,6 +109,12 @@ def main() -> None:
         pipeline, config.artifacts.onnx_path, config.artifacts, config.data.labels
     )
     logger.info("ONNX classifier exported to %s", paths.model)
+    metadata = load_metadata(
+        config.artifacts.model_path, config.artifacts.metadata_file
+    )
+    run_id = metadata.get("mlflow_run_id")
+    if run_id:
+        log_onnx_artifacts_to_mlflow(run_id, paths)
 
 
 if __name__ == "__main__":

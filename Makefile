@@ -1,6 +1,6 @@
-.PHONY: env install nlp-resources lint format test test-cov \
+.PHONY: env install nlp-resources install-experiments lint format test test-cov \
         dataset train evaluate promote export-onnx analyze-corpus benchmark-latency pipeline \
-        api mlflow compose-build compose-up compose-down \
+        finetune-bert experiments api demo mlflow compose-build compose-up compose-down \
         airflow-up airflow-down
 
 # `poetry` nem sempre está no PATH (ex.: Windows Store Python instala o script
@@ -17,7 +17,7 @@ env:
 	python -m pip install poetry==1.8.3 --quiet
 	$(POETRY) install --with dev
 
-SPACY_MODEL_URL := https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
+SPACY_MODEL_URL := https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl
 # scispaCy — vetores biomedicos usados pela Strategy features.type=embeddings
 SCISPACY_MODEL_URL := https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.5.4/en_core_sci_md-0.5.4.tar.gz
 
@@ -27,6 +27,11 @@ nlp-resources:
 	$(POETRY) run python -m nltk.downloader stopwords
 	$(POETRY) run python -m pip install --no-cache-dir $(SPACY_MODEL_URL)
 	$(POETRY) run python -m pip install --no-cache-dir $(SCISPACY_MODEL_URL)
+
+# Dependências pesadas usadas apenas pelos experimentos BERT e pelo tracking.
+install-experiments:
+	$(POETRY) install --with train,experiments
+	$(MAKE) nlp-resources
 
 # ─── Qualidade de Código ──────────────────────────────────────────────────────
 
@@ -74,8 +79,19 @@ analyze-corpus:
 benchmark-latency:
 	$(POETRY) run python -m scripts.measure_latency
 
+finetune-bert:
+	$(POETRY) run python -m scripts.finetune_bert
+
 # Pipeline completo: dataset → treino → avaliação → export ONNX → benchmark
 pipeline: dataset train evaluate export-onnx benchmark-latency
+
+# Treina+avalia os 3 combos sklearn oficiais (docs/metodologia_experimentos.md),
+# restaura config.yaml e re-treina a config original no final (mantém
+# models/artifacts/ no modelo de produção), depois promove o melhor run.
+# Ver scripts/compare_experiments.py para opções (--include-bert, --no-promote,
+# --experiments <subset>).
+experiments:
+	$(POETRY) run python -m scripts.compare_experiments
 
 # ─── Serviço local ──────────────────────────────────────────────────────────────
 
@@ -83,6 +99,11 @@ API_PORT ?= 8000
 api:
 	$(POETRY) run uvicorn src.serving.api:app \
 		--host 0.0.0.0 --port $(API_PORT) --reload
+
+# Sobe a API e já indica a demo interativa em /demo (requer 'make train' antes).
+demo:
+	@echo "Demo interativa: http://localhost:$(API_PORT)/demo"
+	$(MAKE) api
 
 # MLflow local (sem Docker) — abre na hora, sem pull/build de imagem.
 # Porta parametrizável: make mlflow MLFLOW_PORT=5001 (ajuste MLFLOW_TRACKING_URI no .env)

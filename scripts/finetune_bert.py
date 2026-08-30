@@ -8,8 +8,10 @@ the same experiment for side-by-side comparison.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+from pathlib import Path
 
 import mlflow
 import numpy as np
@@ -26,6 +28,10 @@ from transformers import (
 )
 
 from src.data.make_dataset import load_processed_split
+from src.evaluation.evaluate import (
+    build_label_sets,
+    evaluate_predictions_with_label_sets,
+)
 from src.utils.config_loader import CANONICAL_LABELS, ExperimentConfig, load_config
 from src.utils.logging_config import configure_logging
 
@@ -81,7 +87,9 @@ def compute_metrics(eval_pred: EvalPrediction) -> dict[str, float]:
     }
 
 
-def log_to_mlflow(test_metrics: dict) -> None:
+def log_to_mlflow(
+    train_metrics: dict, test_metrics: dict, corpus_metrics: dict
+) -> None:
     """Log this experimental run to the same MLflow experiment for comparison."""
     tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5000")
     try:
@@ -91,12 +99,58 @@ def log_to_mlflow(test_metrics: dict) -> None:
             mlflow.log_param("model_type", MODEL_NAME)
             mlflow.log_param("feature_type", "transformer")
             mlflow.log_param("max_length", MAX_LENGTH)
+            mlflow.log_param("num_train_epochs", 3)
+            for key, value in train_metrics.items():
+                if isinstance(value, int | float):
+                    mlflow.log_metric(f"train_{key.replace('train_', '')}", value)
             for key, value in test_metrics.items():
-                mlflow.log_metric(f"test_{key.replace('eval_', '')}", value)
+                if isinstance(value, int | float):
+                    mlflow.log_metric(f"test_{key.replace('test_', '')}", value)
+            for key, value in corpus_metrics.items():
+                if isinstance(value, int | float):
+                    mlflow.log_metric(f"test_{key}", value)
+            mlflow.log_dict(corpus_metrics, "corpus_aware_metrics.json")
     except Exception:
         logger.warning(
             "MLflow tracking unavailable at %s; skipping run log", tracking_uri
         )
+
+
+def persist_experiment_outputs(
+    trainer: Trainer,
+    tokenizer: AutoTokenizer,
+    truth: list[str],
+    predicted: list[str],
+    probabilities: np.ndarray,
+    corpus_metrics: dict,
+    test_metrics: dict,
+) -> None:
+    """Save the checkpoint and per-sample outputs required for later auditing."""
+    output_path = Path(OUTPUT_DIR)
+    output_path.mkdir(parents=True, exist_ok=True)
+    trainer.save_model(output_path)
+    tokenizer.save_pretrained(output_path)
+    (output_path / "test_metrics.json").write_text(
+        json.dumps(test_metrics, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    prediction_rows = []
+    for index, (expected, prediction, scores) in enumerate(
+        zip(truth, predicted, probabilities, strict=True)
+    ):
+        prediction_rows.append(
+            {
+                "row_index": index,
+                "expected_label": expected,
+                "predicted_label": prediction,
+                "scores": dict(zip(CANONICAL_LABELS, scores.tolist(), strict=True)),
+            }
+        )
+    (output_path / "test_predictions.json").write_text(
+        json.dumps(prediction_rows, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    (output_path / "corpus_aware_metrics.json").write_text(
+        json.dumps(corpus_metrics, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
 
 
 def main() -> None:
@@ -136,10 +190,35 @@ def main() -> None:
         eval_dataset=validation_dataset,
         compute_metrics=compute_metrics,
     )
-    trainer.train()
-    test_metrics = trainer.evaluate(test_dataset)
-    logger.info("Test metrics: %s", test_metrics)
-    log_to_mlflow(test_metrics)
+    train_result = trainer.train()
+    prediction_output = trainer.predict(test_dataset)
+    test_metrics = prediction_output.metrics
+    probabilities = torch.softmax(
+        torch.as_tensor(prediction_output.predictions), dim=1
+    ).numpy()
+    predicted_ids = np.argmax(probabilities, axis=1)
+    predicted = [CANONICAL_LABELS[index] for index in predicted_ids]
+    truth = list(test[config.data.label_column])
+    corpus_metrics = evaluate_predictions_with_label_sets(
+        predicted,
+        probabilities,
+        CANONICAL_LABELS,
+        test,
+        config,
+        build_label_sets(config),
+    )
+    reported_metrics = {**test_metrics, **corpus_metrics}
+    logger.info("Test metrics: %s", reported_metrics)
+    persist_experiment_outputs(
+        trainer,
+        tokenizer,
+        truth,
+        predicted,
+        probabilities,
+        corpus_metrics,
+        test_metrics,
+    )
+    log_to_mlflow(train_result.metrics, prediction_output.metrics, corpus_metrics)
 
 
 if __name__ == "__main__":

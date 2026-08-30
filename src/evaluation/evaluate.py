@@ -16,9 +16,11 @@ import pandas as pd
 from sklearn.metrics import (
     accuracy_score,
     confusion_matrix,
+    jaccard_score,
     precision_recall_fscore_support,
 )
 from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import MultiLabelBinarizer
 
 from src.data.make_dataset import load_medical_corpus, load_processed_split
 from src.models.registry import load_metadata, load_pipeline
@@ -162,6 +164,55 @@ def _top_2_accuracy(
     return float(np.mean(hits))
 
 
+def _multilabel_metrics(
+    predicted: list[str],
+    texts: pd.Series,
+    label_sets: dict[str, set[str]],
+    labels: list[str],
+) -> dict[str, float]:
+    """Score the single prediction against the full multi-label ground truth.
+
+    The corpus keeps every valid label per abstract (``build_label_sets``);
+    the model still emits one label per prediction. This binarizes both sides
+    (predicted label -> one-hot, valid label set -> multi-hot) and scores them
+    with standard multilabel precision/recall/F1/accuracy, so a hit on any
+    valid label counts as correct rather than only the one row the corpus
+    happened to keep after flattening to multiclass. See
+    ``docs/metodologia_experimentos.md`` for why this is the metric that
+    reflects real-world value on this corpus, ahead of the flattened
+    single-label scores in ``evaluate_split``.
+    """
+    binarizer = MultiLabelBinarizer(classes=labels)
+    truth_matrix = binarizer.fit_transform(
+        [label_sets.get(text, set()) for text in texts]
+    )
+    predicted_matrix = binarizer.transform([[label] for label in predicted])
+    macro_precision, macro_recall, macro_f1, _ = precision_recall_fscore_support(
+        truth_matrix, predicted_matrix, average="macro", zero_division=0
+    )
+    micro_precision, micro_recall, micro_f1, _ = precision_recall_fscore_support(
+        truth_matrix, predicted_matrix, average="micro", zero_division=0
+    )
+    # Samples-averaged Jaccard: intersection-over-union per row, then averaged.
+    # With exactly one predicted label, a hit scores 1/|valid label set| — the
+    # standard multilabel "accuracy" (Godbole & Sarawagi, 2004), unlike
+    # in_set_accuracy which does not discount for how many labels were valid.
+    accuracy = float(
+        jaccard_score(
+            truth_matrix, predicted_matrix, average="samples", zero_division=0
+        )
+    )
+    return {
+        "multilabel_precision_macro": float(macro_precision),
+        "multilabel_recall_macro": float(macro_recall),
+        "multilabel_f1_macro": float(macro_f1),
+        "multilabel_precision_micro": float(micro_precision),
+        "multilabel_recall_micro": float(micro_recall),
+        "multilabel_f1_micro": float(micro_f1),
+        "multilabel_accuracy": accuracy,
+    }
+
+
 def evaluate_with_label_sets(
     pipeline: Pipeline,
     frame: pd.DataFrame,
@@ -169,19 +220,55 @@ def evaluate_with_label_sets(
     label_sets: dict[str, set[str]],
 ) -> dict:
     """Add corpus-aware honesty metrics on top of the standard split metrics."""
+    texts = frame[config.data.text_column]
+    predicted = list(pipeline.predict(texts))
+    probabilities = (
+        np.asarray(pipeline.predict_proba(texts))
+        if hasattr(pipeline, "predict_proba")
+        else None
+    )
+    classes = list(pipeline.classes_) if probabilities is not None else None
+    return evaluate_predictions_with_label_sets(
+        predicted, probabilities, classes, frame, config, label_sets
+    )
+
+
+def evaluate_predictions_with_label_sets(
+    predicted: list[str],
+    probabilities: np.ndarray | None,
+    classes: list[str] | None,
+    frame: pd.DataFrame,
+    config: ExperimentConfig,
+    label_sets: dict[str, set[str]],
+) -> dict:
+    """Compute corpus-aware metrics from already generated model outputs."""
     text_column, label_column = config.data.text_column, config.data.label_column
     texts, truth = frame[text_column], frame[label_column]
-    predicted = list(pipeline.predict(texts))
+    if len(predicted) != len(frame):
+        raise ValueError("predicted labels must match the evaluated frame length")
+    if probabilities is not None and probabilities.shape[0] != len(frame):
+        raise ValueError("probabilities must match the evaluated frame length")
+    if probabilities is not None and (
+        classes is None or probabilities.shape[1] != len(classes)
+    ):
+        raise ValueError("probability columns must match the supplied classes")
     label_counts = texts.map(lambda text: len(label_sets.get(text, set())))
     in_set = [
         p in label_sets.get(t, set()) for p, t in zip(predicted, texts, strict=True)
     ]
+    top_2_accuracy = None
+    if probabilities is not None and classes is not None:
+        top_2 = np.asarray(classes)[np.argsort(-probabilities, axis=1)[:, :2]]
+        top_2_accuracy = float(
+            np.mean([label in row for label, row in zip(truth, top_2, strict=True)])
+        )
     return {
         "in_set_accuracy": float(np.mean(in_set)),
         "accuracy_by_label_count": _accuracy_by_label_count(
             predicted, truth, label_counts
         ),
-        "top_2_accuracy": _top_2_accuracy(pipeline, texts, truth),
+        "top_2_accuracy": top_2_accuracy,
+        **_multilabel_metrics(predicted, texts, label_sets, config.data.labels),
     }
 
 
@@ -201,6 +288,9 @@ def _log_honesty_metrics(split_name: str, split_metrics: dict) -> None:
         mlflow.log_metric(
             f"{split_name}_top_2_accuracy", split_metrics["top_2_accuracy"]
         )
+    for key, value in split_metrics.items():
+        if key.startswith("multilabel_") and value is not None:
+            mlflow.log_metric(f"{split_name}_{key}", value)
 
 
 def _log_split_metrics(split_name: str, split_metrics: dict) -> None:

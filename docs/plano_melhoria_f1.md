@@ -68,7 +68,8 @@ Runs do experimento `Medical Text Classifier API` (`mlflow.db`):
 Três leituras importantes desta tabela:
 
 - Os três primeiros estão dentro do **ruído um do outro**. A validação tem
-  1.155 linhas; o desvio-padrão entre folds numa CV 5-fold é de ±0,007 a
+  1.155 linhas; o desvio-padrão observado entre folds naquela CV 5-fold
+  exploratória era de ±0,007 a
   ±0,011. Diferenças de 0,005 não significam nada.
 - Todos os runs usaram **hiperparâmetros default**: `C=1.0`, `alpha=1.0`,
   `n_estimators=160`. Nenhuma busca foi feita.
@@ -207,7 +208,9 @@ comprovadamente ajuda:
 
 ### 3.6 A comparação de modelos no MLflow está viciada
 
-Validação cruzada 5-fold sobre treino+val (n=11.550), texto pré-processado:
+Resultado exploratório histórico com validação cruzada 5-fold sobre treino+val
+(n=11.550), texto pré-processado. Este quadro não é o protocolo oficial atual,
+que usa 3 folds e está registrado em `docs/metodologia_experimentos.md`:
 
 | Configuração | CV F1-macro | Test F1-macro |
 | --- | --- | --- |
@@ -258,7 +261,7 @@ ou `RandomizedSearchCV` com `scoring="f1_macro"`, `StratifiedKFold(5)`) sobre:
 ```yaml
 tuning:
   enabled: true
-  cv_folds: 5
+  cv_folds: 3
   scoring: f1_macro
   grid:
     linear_svm:
@@ -458,7 +461,7 @@ um método defensável e a análise que diferencia o trabalho.
 
 Para que as próximas comparações valham alguma coisa:
 
-1. **Toda decisão de modelo sai de CV 5-fold estratificada** sobre treino+val
+1. **Toda decisão de modelo sai de CV 3-fold estratificada** sobre treino+val
    (n=11.550), nunca do split de validação isolado.
 2. **Reportar média ± desvio entre folds.** Diferenças menores que 2× o desvio
    (≈0,015) não são conclusão — são ruído.

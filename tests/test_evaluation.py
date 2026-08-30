@@ -187,6 +187,29 @@ def test_top_2_accuracy_returns_none_without_predict_proba() -> None:
     assert result is None
 
 
+def test_multilabel_metrics_scores_hits_against_the_full_valid_label_set() -> None:
+    labels = CANONICAL_LABELS
+    texts = pd.Series(["shared", "only-a", "miss"])
+    predicted = [CANONICAL_LABELS[0], CANONICAL_LABELS[2], CANONICAL_LABELS[4]]
+    label_sets = {
+        # predicted[0] is one of two valid labels here: a hit, discounted by
+        # the size of the valid set (samples-averaged Jaccard).
+        "shared": {CANONICAL_LABELS[0], CANONICAL_LABELS[1]},
+        # predicted[1] is the only valid label: a full-credit hit.
+        "only-a": {CANONICAL_LABELS[2]},
+        # predicted[2] is not in the valid set: a miss.
+        "miss": {CANONICAL_LABELS[3]},
+    }
+
+    metrics = evaluation._multilabel_metrics(predicted, texts, label_sets, labels)
+
+    assert metrics["multilabel_accuracy"] == pytest.approx((0.5 + 1.0 + 0.0) / 3)
+    # 2 of 3 predictions land inside their valid label set.
+    assert metrics["multilabel_precision_micro"] == pytest.approx(2 / 3)
+    # 2 correctly-covered labels out of 4 total valid labels across rows.
+    assert metrics["multilabel_recall_micro"] == pytest.approx(2 / 4)
+
+
 def test_evaluate_with_label_sets_merges_honesty_metrics() -> None:
     config = _config()
     frame = pd.DataFrame(
@@ -218,3 +241,7 @@ def test_evaluate_with_label_sets_merges_honesty_metrics() -> None:
         "2": pytest.approx(0.0),
     }
     assert metrics["top_2_accuracy"] == pytest.approx(1.0)
+    # Both predictions are hits, but "shared" has 2 valid labels, so its
+    # per-row Jaccard is 1/2 rather than the full 1/1 "only-a" gets.
+    assert metrics["multilabel_accuracy"] == pytest.approx((0.5 + 1.0) / 2)
+    assert metrics["multilabel_f1_macro"] > 0
