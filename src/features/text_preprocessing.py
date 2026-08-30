@@ -76,11 +76,30 @@ class PunctuationRemovalStrategy:
 class LemmatizationStrategy:
     """Tokenize and lemmatize text with a preloaded spaCy pipeline."""
 
-    def __init__(self, nlp: NlpPipeline) -> None:
+    def __init__(
+        self, model_name: str, nlp: NlpPipeline | None = None
+    ) -> None:
+        self.model_name = model_name
         self.nlp = nlp
+
+    def __getstate__(self) -> dict[str, str]:
+        """Persist only the model name, avoiding OS-specific spaCy paths."""
+        return {"model_name": self.model_name}
+
+    def __setstate__(self, state: dict[str, object]) -> None:
+        """Restore a portable state, including artifacts from the old format."""
+        model_name = state.get("model_name")
+        if not isinstance(model_name, str):
+            legacy_nlp = state["nlp"]
+            metadata = legacy_nlp.meta  # type: ignore[attr-defined]
+            model_name = f"{metadata['lang']}_{metadata['name']}"
+        self.model_name = model_name
+        self.nlp = None
 
     def transform(self, text: str) -> str:
         """Return whitespace-separated token lemmas."""
+        if self.nlp is None:
+            self.nlp = _load_spacy_model(self.model_name)
         lemmas = [token.lemma_ or token.text for token in self.nlp(text)]
         return _normalize_spaces(" ".join(lemmas))
 
@@ -132,9 +151,7 @@ class PreprocessingFactory:
             "punctuation_removal": lambda: PunctuationRemovalStrategy(
                 config.preserve_numbers
             ),
-            "lemmatization": lambda: LemmatizationStrategy(
-                _load_spacy_model(config.spacy_model)
-            ),
+            "lemmatization": lambda: LemmatizationStrategy(config.spacy_model),
             "stopword_removal": lambda: StopwordRemovalStrategy(
                 _load_stopwords(config.language)
             ),

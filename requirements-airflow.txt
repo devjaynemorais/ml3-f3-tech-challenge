@@ -1,0 +1,14 @@
+# Dependências da DAG, resolvidas sob as constraints oficiais do Airflow.
+scikit-learn>=1.4,<1.8
+pandas>=2.1,<2.2
+numpy>=1.26,<2
+pydantic-settings>=2.2
+PyYAML>=6.0.1
+joblib>=1.4
+skl2onnx>=1.16
+onnx>=1.16,<1.19
+onnxruntime>=1.17
+nltk>=3.10,<4
+spacy>=3.7.4,<3.8
+Unidecode>=1.4,<2
+mlflow==2.16.0
