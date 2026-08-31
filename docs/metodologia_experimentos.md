@@ -1,13 +1,28 @@
 # Metodologia dos Experimentos
 
+> **Status:** retrato histórico — os números e run IDs abaixo (`in_set_accuracy`,
+> `accuracy_by_label_count`, `top_2_accuracy`) foram medidos **antes** da
+> migração P3 para multirrótulo genuíno (`OneVsRestClassifier` sobre labels
+> agregados por abstract, `src/data/make_dataset.py::aggregate_multilabel_split`;
+> ver `docs/model_card.md`). Essas métricas reconstruíam o conjunto de rótulos
+> válidos por abstract a partir de linhas duplicadas para compensar um modelo
+> single-label — hoje esse conjunto já é o próprio target multi-hot da linha,
+> então **as métricas justas atuais são `macro_avg.f1` (F1-macro multirrótulo,
+> exibida como `test_f1_macro`) e `jaccard_samples` (accuracy multirrótulo por
+> amostra, Godbole & Sarawagi 2004, exibida como `ml_accuracy`)** — priorize
+> essas duas. Ver `docs/model_card.md#avaliação` para a definição corrente e
+> `metrics/eval_metrics.json`/`metrics/experiment_comparison.json` para os
+> números vigentes (gerados por `make experiments`).
+
 ## Objetivo
 
 Este documento registra os 4 experimentos oficiais escolhidos para demonstrar a
 evolução metodológica do projeto (apresentação/vídeo), entre os 7 candidatos
 efetivamente testados durante a investigação de melhoria de F1 descrita em
 `docs/plano_melhoria_f1.md`. Os números aqui são um retrato fixo, obtidos e
-validados nesta sessão; para o estado corrente do artefato servido, ver
-`metrics/eval_metrics.json` e `docs/model_card.md`.
+validados nesta sessão (single-label, ver banner de status acima); para o
+estado corrente do artefato servido, ver `metrics/eval_metrics.json` e
+`docs/model_card.md`.
 
 ## Metodologia comum a todos os experimentos
 

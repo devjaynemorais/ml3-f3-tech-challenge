@@ -2,7 +2,7 @@
 
 ## Finalidade
 
-Classificar abstracts públicos em inglês em cinco categorias amplas:
+Classificar abstracts públicos em inglês em uma ou mais de cinco categorias:
 
 1. `neoplasms`
 2. `digestive system diseases`
@@ -33,9 +33,10 @@ Schopf, Braun e Matthes, *Evaluating Unsupervised Text Classification:
 Zero-Shot and Similarity-Based Approaches*, DOI
 [`10.1145/3582768.3582795`](https://doi.org/10.1145/3582768.3582795).
 
-O treino oficial é dividido de forma estratificada em 90% para fit e 10% para
-validação, usando `random_state=42`. O teste oficial permanece integral e é
-avaliado somente depois do treino.
+Treino e teste são agregados separadamente por abstract. Se um texto aparece
+nos dois CSVs oficiais, ele é removido somente do treino; nenhum label atravessa
+a fronteira. Isso elimina 988 grupos/1.097 linhas brutas do treino e deixa
+8.457 abstracts para treino+validação e 2.770 no teste, com sobreposição zero.
 
 ## Preprocessing e features
 
@@ -59,7 +60,8 @@ training-serving skew.
 
 ## Modelos
 
-- **padrão: Regressão Logística balanceada** (`C=0.3`, escolhida por busca de
+- **padrão: One-vs-Rest com Regressão Logística balanceada**, uma decisão
+  binária independente por categoria, escolhida por busca de
   hiperparâmetros com validação cruzada — ver seção seguinte; melhor
   F1-macro, mais estável entre folds e melhor recall de classes minoritárias
   entre os candidatos comparados);
@@ -85,7 +87,7 @@ para comparar lado a lado.
 ### Busca de hiperparâmetros e critério de promoção (CV)
 
 Com `tuning.enabled: true` (padrão), `make train` roda uma busca em grade
-(`config.tuning.grid`) com validação cruzada estratificada
+(`config.tuning.grid`) com validação cruzada por abstracts já agrupados
 (`config.tuning.cv_folds` folds) sobre **treino + validação combinados**,
 otimizando `f1_macro`. O pipeline vencedor já sai re-treinado (refit) em todo
 esse conjunto — por isso `metadata["refit_includes_validation"] = true` e a
@@ -99,44 +101,27 @@ split único: com ~1.150 linhas de validação, diferenças abaixo de ~0.015 sã
 ruído estatístico, não sinal — ver `docs/plano_melhoria_f1.md` seção 3.6 para
 o caso real em que isso invalidou uma comparação anterior.
 
-Resultado da comparação (3-fold CV sobre treino+validação, grade reduzida:
-`C`/`alpha` com `class_weight=balanced` fixo):
-
-| Modelo | CV F1-macro (média ± desvio) | Test F1-macro | Test recall minorias |
-| --- | --- | --- | --- |
-| **Logistic Regression (C=0.3)** | **0.6165 ± 0.0023** | **0.6169** | **0.735** |
-| Complement NB (alpha=2.0) | 0.6067 ± 0.0048 | 0.6070 | 0.660 |
-| Linear SVM calibrado (C=0.05) | 0.5963 ± 0.0095 | 0.6064 | 0.512 |
-
-Comparação estendida (incluindo modelo não-linear, features de embeddings e
-fine-tuning de BERT genérico), com o racional de escolha e exclusão de cada
-candidato, em `docs/metodologia_experimentos.md`.
+Os números vigentes são gerados por `make experiments` em
+`metrics/experiment_comparison.json`; a demo lê esse arquivo diretamente para
+evitar tabelas desatualizadas.
 
 ## Avaliação
 
-`make evaluate` grava `metrics/eval_metrics.json` com seções `validation` e
-`test`. Cada seção contém accuracy, precision/recall/F1 por classe, métricas
-macro e weighted, recall médio das duas classes minoritárias, labels e matriz de
-confusão.
+`make evaluate` grava `metrics/eval_metrics.json` com subset accuracy, Hamming
+loss, Jaccard por amostra, cardinalidade de labels, precision/recall/F1 por
+classe e médias macro, micro e weighted.
 
-A seção `test` também traz três métricas "honestas" que contextualizam o
-F1-macro diante de um corpus multi-rótulo achatado (ver
-`docs/plano_melhoria_f1.md`):
-
-- **`in_set_accuracy`** — fração de previsões que pertencem ao conjunto
-  completo de rótulos válidos daquele abstract no corpus (um abstract pode
-  aparecer sob mais de uma condição). Sempre ≥ accuracy exata.
-- **`accuracy_by_label_count`** — accuracy exata, estratificada por quantos
-  rótulos válidos o abstract carrega (`"1"`, `"2"`, `"3"`, `"4"`). Cai
-  fortemente conforme o abstract tem mais rótulos possíveis, porque o
-  gabarito escolheu só um deles.
-- **`top_2_accuracy`** — fração em que o rótulo verdadeiro está entre as duas
-  classes de maior probabilidade prevista; relevante porque o uso declarado é
-  apoio à priorização, não decisão automática, e um top-2 já é acionável
-  nesse contexto.
-
-Essas três métricas não substituem o F1-macro reportado — apenas mostram, com
-número, o que ele não consegue medir neste corpus especificamente.
+**Métricas justas (priorizar estas duas):** `macro_avg.f1` (F1-macro
+multirrótulo) é a métrica principal — trata cada classe com peso igual,
+resiste ao desbalanceamento entre as 5 categorias. `jaccard_samples`
+(accuracy multirrótulo por amostra, Godbole & Sarawagi 2004) é a métrica de
+"accuracy" a reportar — mede a sobreposição média entre o conjunto previsto e
+o verdadeiro por abstract. `subset_accuracy` (coincidência exata do conjunto
+inteiro de rótulos) e `hamming_loss` (erros por decisão binária) contextualizam
+mas não devem substituir as duas primeiras: `subset_accuracy` é a mais rígida
+das quatro e tende a subestimar o desempenho real quando um abstract tem mais
+de um rótulo válido. `scripts/compare_experiments.py` imprime `test_f1_macro`
+e `ml_accuracy` (= `jaccard_samples`) lado a lado por experimento.
 
 As métricas devem ser reportadas a partir do arquivo gerado na mesma versão do
 artefato servido. Não há números fixos neste documento para evitar publicar
@@ -155,16 +140,13 @@ testada com `rtol=1e-5` e `atol=1e-6`.
 
 ## Limitações e riscos
 
-- **O corpus é multi-rótulo achatado em multiclasse**: 26% dos abstracts
+- **O corpus original é multi-rótulo achatado em linhas**: 26% dos abstracts
   aparecem mais de uma vez no dataset original, cada ocorrência com uma
   condição diferente igualmente válida — o mesmo texto pode legitimamente ser
-  `neoplasms` numa linha e `general pathological conditions` em outra. Um
-  oráculo que sorteia entre os rótulos válidos de cada abstract atinge
-  F1-macro ≈ 0.78 no teste oficial; esse é o teto real de um classificador
-  single-label neste corpus, não um limite do modelo ou das features.
-  Diagnóstico completo, incluindo a decomposição do erro por número de
-  rótulos e a proposta de reformulação como multi-rótulo, em
-  `docs/plano_melhoria_f1.md`.
+  `neoplasms` numa linha e `general pathological conditions` em outra.
+  O pipeline atual agrega esses labels dentro de cada split e treina um modelo
+  multilabel. Labels que existem apenas nas linhas removidas do treino não são
+  copiados para o teste; por isso o ground truth pode continuar incompleto.
 - `general pathological conditions` concentra a maior parte dos erros do
   modelo, espalhados quase igualmente entre as outras 4 classes (sem par de
   confusão dominante) — consequência direta do ponto acima: é a classe mais

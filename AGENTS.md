@@ -76,8 +76,9 @@ priorização, não um diagnóstico clínico nem substituto de revisão humana.
 - As labels válidas, na ordem canônica, são `neoplasms`,
   `digestive system diseases`, `nervous system diseases`,
   `cardiovascular diseases` e `general pathological conditions`.
-- A validação usa 10% estratificados somente do treino oficial; o teste oficial
-  deve permanecer integral e fora do fit.
+- Treino e teste são agregados separadamente por abstract em cinco targets
+  binários. Textos presentes no teste são removidos somente do treino; nenhum
+  label atravessa splits. A validação usa 10% do treino já agrupado e seguro.
 - Para a entrega final, documente origem, tamanho,
   colunas, licença, limitações e impactos nas métricas.
 - Em dados clínicos ou hospitalares, não exponha identificadores de pacientes,
@@ -86,9 +87,12 @@ priorização, não um diagnóstico clínico nem substituto de revisão humana.
 ### Modelo e artefatos
 
 - O pipeline base concatena as Strategies configuradas de preprocessamento,
-  `TfidfVectorizer` e uma Strategy de `LogisticRegression`,
+  `TfidfVectorizer`, `OneVsRestClassifier` e uma Strategy de `LogisticRegression`,
   `RandomForestClassifier` ou `GradientBoostingClassifier`, construído em
-  `src/models/classifier.py`.
+  `src/models/classifier.py`. Com `TRAINING_DEVICE=cuda`/`gpu` explícito no
+  `.env`, `gradient_boosting` troca para `XGBClassifier` (`device="cuda"`) em
+  vez do `GradientBoostingClassifier` do sklearn — ver `src/utils/device.py`.
+  Exportação ONNX não suporta esse caso (ver `src/optimization/export_onnx.py`).
 - O pipeline sklearn treinado deve ser salvo em
   `models/artifacts/triage_pipeline.joblib`.
 - A metadata deve ser salva em `models/artifacts/model_metadata.json`.
@@ -110,8 +114,8 @@ Endpoints públicos esperados:
 
 - `GET /`: metadados do serviço.
 - `GET /health`: estado de carregamento do modelo.
-- `POST /predict`: recebe `{"text": "..."}` e retorna `label`, `scores` e
-  `backend`.
+- `POST /predict`: recebe `{"text": "..."}` e retorna `labels`, `label`
+  principal, `scores` independentes e `backend`.
 - `GET /metrics`: métricas Prometheus.
 - `GET /docs`: Swagger UI gerado pelo FastAPI.
 

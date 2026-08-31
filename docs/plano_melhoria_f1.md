@@ -5,6 +5,17 @@ do classificador de abstracts médicos. Todos os números abaixo foram medidos
 neste repositório, sobre os splits em `data/processed/`, e são reproduzíveis
 pelos scripts descritos no Apêndice.
 
+> **Status:** diagnóstico histórico — descreve o estado single-label que
+> motivou as mudanças. A frente **P0** (tuning + CV, §1 item 1) e a frente
+> **P3** (reformular como multirrótulo, §1 item 3) já foram implementadas em
+> produção (`src/models/classifier.py`, `OneVsRestClassifier`; ver
+> `docs/model_card.md` e `notebooks/01_eda_nlp_hospital.ipynb` §7 para a
+> análise que motivou a decisão). A frente **P2** (transformer biomédico) foi
+> testada como baseline experimental (`scripts/finetune_bert.py`), documentada
+> em `docs/metodologia_experimentos.md`, e não substituiu a produção. Os
+> números de F1/teto teórico abaixo são do modelo single-label anterior à
+> migração — não descrevem o pipeline atual.
+
 ---
 
 ## 1. Resumo executivo

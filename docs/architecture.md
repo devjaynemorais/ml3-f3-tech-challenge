@@ -6,14 +6,16 @@
 medical_tc_{train,test,labels}.csv
           |
           v
-validação + mapeamento + split estratificado de validação
+validação + agregação multilabel separada por split
+          |
+remoção do treino dos textos presentes no teste
           |
           +--> data/processed/train.csv
           +--> data/processed/validation.csv
-          +--> data/processed/test.csv (teste oficial integral)
+          +--> data/processed/test.csv (abstracts oficiais agregados)
                          |
                          v
-Strategies de preprocessing -> TF-IDF -> Strategy do modelo
+Strategies de preprocessing -> TF-IDF -> One-vs-Rest
                          |
              +-----------+-----------+
              v                       v
@@ -22,7 +24,7 @@ triage_pipeline.joblib       prefixo de features + ONNX
              +------- TriagePredictor+
                          |
                          v
-FastAPI /predict -> label + cinco scores + backend
+FastAPI /predict -> labels + label principal + cinco scores + backend
 ```
 
 O domínio é a classificação de abstracts públicos em inglês nas categorias
@@ -36,14 +38,15 @@ representa fluxo hospitalar real nem constitui validação clínica.
 modelos e nomes de artefatos. `src/utils/config_loader.py` valida o YAML com
 Pydantic antes de qualquer etapa.
 
-O pipeline de dados valida os três CSVs, canonicaliza as colunas como `text` e
-`label`, cria validação apenas do treino oficial e persiste os splits uma vez.
-Treino e avaliação apenas leem os arquivos processados; o teste oficial não é
-usado no fit.
+O pipeline valida os três CSVs e processa treino/teste separadamente. Dentro de
+cada split, textos iguais são agregados e seus labels viram cinco targets
+binários. Os 988 grupos também presentes no teste são removidos somente do
+treino; nenhum texto ou label do teste participa do fit. A validação é criada
+depois dessa limpeza e a sobreposição final é zero.
 
 Preprocessing e modelo usam Factory e Strategy. O builder comum concatena o
-preprocessor configurado, TF-IDF e os passos do modelo ativo. Regressão
-Logística é o padrão; Random Forest e Gradient Boosting são alternativas
+preprocessor configurado, TF-IDF e os passos do modelo ativo, envolvidos por
+`OneVsRestClassifier`. Regressão Logística é o padrão; Random Forest e Gradient Boosting são alternativas
 explícitas. Somente a Strategy de Gradient Boosting aplica chi-quadrado e
 conversão densa.
 

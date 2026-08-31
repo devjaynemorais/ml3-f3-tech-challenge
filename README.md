@@ -1,6 +1,6 @@
 # Medical Text Classifier API
 
-Sistema MLOps de classificação multiclasse de abstracts médicos públicos em
+Sistema MLOps de classificação multilabel de abstracts médicos públicos em
 inglês, desenvolvido para o Tech Challenge da Fase 3 de Machine Learning
 Engineering da FIAP. O pipeline prepara o Medical Abstracts TC Corpus, treina
 um classificador NLP leve e o serve por uma API FastAPI observável.
@@ -27,7 +27,8 @@ classificação por requisição com baixa latência. A arquitetura combina:
 - preprocessing configurável por Strategy e Factory;
 - features por TF-IDF (padrão) ou embeddings biomédicos pré-treinados (spaCy
   `en_core_sci_md`), selecionável no YAML;
-- classificador por Regressão Logística (padrão — melhor F1-macro em
+- cinco classificadores binários One-vs-Rest com Regressão Logística
+  (padrão — melhor F1-macro em
   validação cruzada entre os comparados), Complement Naive Bayes, Linear SVM
   calibrado, Random Forest ou Gradient Boosting, todos selecionáveis no YAML;
 - busca de hiperparâmetros por validação cruzada (`tuning.enabled` no YAML) —
@@ -103,8 +104,10 @@ data/raw/medical_tc_labels.csv
 
 Os arquivos de treino e teste devem conter `condition_label` e
 `medical_abstract`; o arquivo de labels deve conter `condition_label` e
-`condition_name`. `make dataset` valida os schemas e o mapeamento, retira 10%
-estratificados somente do treino oficial e persiste:
+`condition_name`. `make dataset` processa treino e teste separadamente, agrega
+os labels repetidos de cada abstract, remove somente do treino qualquer texto
+presente no teste e retira 10% do treino seguro para validação. Os arquivos
+processados têm uma coluna de texto e cinco targets binários:
 
 ```text
 data/processed/train.csv
@@ -112,11 +115,10 @@ data/processed/validation.csv
 data/processed/test.csv
 ```
 
-O teste oficial permanece integral e nunca participa do fit. Dados, modelos e
-métricas gerados ficam fora do Git. Como o corpus original repete alguns
-abstracts sob rótulos diferentes, as 14.438 linhas correspondem a 11.227 textos
-únicos; essa estrutura multirrótulo achatada e seus efeitos nas métricas estão
-documentados no model card e na metodologia dos experimentos.
+O teste preserva seus 2.770 abstracts únicos e nunca participa do fit. Foram
+encontrados 988 textos nos dois CSVs oficiais; todas as 1.097 linhas desses
+textos são descartadas somente do treino. Nenhum label é transferido entre
+splits. O resultado é treino+validação com 8.457 abstracts e sobreposição zero.
 
 ## Início rápido
 
@@ -145,6 +147,22 @@ make install-experiments
 make finetune-bert
 ```
 
+`TRAINING_DEVICE` no `.env` controla o dispositivo do fine-tuning do BERT
+(`auto` detecta GPU se disponível; `cpu`/`cuda` forçam um dos dois — `cuda`
+falha com erro claro se nenhuma GPU for detectada).
+
+Essa mesma variável também acelera `model.type: gradient_boosting` em
+`make train`/`make experiments`: com `TRAINING_DEVICE=cuda` (ou `gpu`)
+**explícito**, o `GradientBoostingStrategy` troca o `GradientBoostingClassifier`
+do scikit-learn (sem backend de GPU) por XGBoost com `device="cuda"`. Só ativa
+com pedido explícito — nunca por auto-detecção, mesmo numa máquina com GPU —
+porque é uma troca de algoritmo, não só de velocidade; os hiperparâmetros
+tunados de `config.yaml` foram validados contra o sklearn, não o XGBoost.
+Exportação para ONNX não é suportada para modelos treinados assim (sirva via
+`MODEL_BACKEND=sklearn` ou retreine em CPU para exportar). Os demais
+`model.type` e TF-IDF/embeddings não têm equivalente de GPU nativo no Windows
+e ignoram a variável, só avisando no log se `cuda`/`gpu` for pedido.
+
 Depois de iniciar a API, abra `http://localhost:8000/docs`.
 
 ## API
@@ -153,7 +171,7 @@ Depois de iniciar a API, abra `http://localhost:8000/docs`.
 |---|---|---|
 | GET | `/` | nome e versão do serviço |
 | GET | `/health` | `ok` com backend ou `degraded` sem artefato válido |
-| POST | `/predict` | recebe `text` e retorna `label`, cinco `scores` e `backend` |
+| POST | `/predict` | recebe `text` e retorna `labels`, `label` principal, cinco scores independentes e `backend` |
 | GET | `/metrics` | métricas Prometheus |
 | GET | `/docs` | Swagger UI |
 | GET | `/explain?text=...` | mesma coisa, mas com o passo a passo (pré-processamento real, termos TF-IDF que mais pesaram) — usado pela demo abaixo |
@@ -277,10 +295,11 @@ o mesmo contrato `TriagePredictor` nos dois backends e grava
 `metrics/latency_comparison.json`.
 
 No benchmark oficial local, com 5 warm-ups e 200 predições unitárias do mesmo
-texto sintético, o pipeline sklearn levou **4,14 ms/texto** em média e o backend
-ONNX **3,37 ms/texto**. Isso representa speedup de **1,228x** e redução média de
-latência de **18,5%**. Os valores são dependentes do hardware; o comando abaixo
-reproduz a comparação no ambiente corrente.
+texto sintético, o pipeline sklearn levou **3,04 ms/texto** em média e o backend
+ONNX **2,72 ms/texto**. Isso representa speedup de **1,118x** e redução média de
+latência de **10,5%**. Os valores são dependentes do hardware e do modelo
+promovido no momento; o comando abaixo reproduz a comparação no ambiente
+corrente e grava os números atuais em `metrics/latency_comparison.json`.
 
 Defina `MODEL_BACKEND=onnx` no `.env` para servir o backend otimizado depois de
 executar `make export-onnx`.
