@@ -12,14 +12,22 @@ from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.feature_selection import SelectKBest, chi2
 from sklearn.linear_model import LogisticRegression
+from sklearn.multiclass import OneVsRestClassifier
 from sklearn.naive_bayes import ComplementNB
 from sklearn.pipeline import Pipeline
 from sklearn.svm import LinearSVC
 from sklearn.utils.validation import check_is_fitted
+from xgboost import XGBClassifier
 
 from src.features.embeddings import SpacyEmbeddingVectorizer
 from src.features.text_preprocessing import TextPreprocessor
-from src.utils.config_loader import ExperimentConfig, FeatureConfig, ModelConfig
+from src.utils.config_loader import (
+    ExperimentConfig,
+    FeatureConfig,
+    GradientBoostingConfig,
+    ModelConfig,
+)
+from src.utils.device import gpu_explicitly_requested, resolve_training_device
 
 
 class AdaptiveChi2Selector(BaseEstimator, TransformerMixin):
@@ -84,11 +92,30 @@ class RandomForestStrategy:
 
 
 class GradientBoostingStrategy:
-    """Own chi-squared selection, dense conversion and Gradient Boosting."""
+    """Own chi-squared selection, dense conversion and Gradient Boosting.
+
+    Switches to GPU-accelerated XGBoost only on an EXPLICIT
+    TRAINING_DEVICE=cuda/gpu, never via auto-detection: scikit-learn's
+    GradientBoostingClassifier has no GPU backend, but swapping in XGBoost is
+    an algorithm change, not just a speed knob, so picking it based on
+    ambient hardware would make training results depend on which machine
+    happens to run it. XGBoost also handles the sparse TF-IDF matrix
+    natively, so the chi-squared selection and dense conversion steps
+    (needed only for sklearn's dense-only GB) are skipped on that path.
+    """
 
     def build_steps(self, config: ModelConfig) -> list[tuple[str, BaseEstimator]]:
         """Create the complete Gradient Boosting-specific suffix."""
         parameters = config.gradient_boosting
+        if gpu_explicitly_requested():
+            resolve_training_device()  # raises a clear error if no GPU is present
+            return [("classifier", _build_xgboost_classifier(parameters))]
+        return self._sklearn_steps(parameters)
+
+    def _sklearn_steps(
+        self, parameters: GradientBoostingConfig
+    ) -> list[tuple[str, BaseEstimator]]:
+        """Build the CPU-only sklearn Gradient Boosting suffix."""
         classifier = GradientBoostingClassifier(
             n_estimators=parameters.n_estimators,
             learning_rate=parameters.learning_rate,
@@ -100,6 +127,18 @@ class GradientBoostingStrategy:
             ("to_dense", DenseTransformer()),
             ("classifier", classifier),
         ]
+
+
+def _build_xgboost_classifier(parameters: GradientBoostingConfig) -> XGBClassifier:
+    """Build the GPU-accelerated XGBoost classifier for one binary label."""
+    return XGBClassifier(
+        n_estimators=parameters.n_estimators,
+        learning_rate=parameters.learning_rate,
+        max_depth=parameters.max_depth,
+        random_state=parameters.random_state,
+        tree_method="hist",
+        device="cuda",
+    )
 
 
 class LinearSvmStrategy:
@@ -165,10 +204,15 @@ def build_features_step(config: FeatureConfig) -> tuple[str, BaseEstimator]:
 
 
 def build_pipeline(config: ExperimentConfig) -> Pipeline:
-    """Compose preprocessing, the configured feature Strategy and the model."""
+    """Compose preprocessing, features and one binary classifier per label."""
     common_steps: list[tuple[str, BaseEstimator]] = [
         ("preprocessor", TextPreprocessor(config.preprocessing)),
         build_features_step(config.features),
     ]
     strategy = ModelFactory.create(config.model.type)
-    return Pipeline([*common_steps, *strategy.build_steps(config.model)])
+    model_steps = strategy.build_steps(config.model)
+    step_name, estimator = model_steps[-1]
+    if step_name != "classifier":
+        raise ValueError("the final model step must be named 'classifier'")
+    multilabel_steps = [*model_steps[:-1], (step_name, OneVsRestClassifier(estimator))]
+    return Pipeline([*common_steps, *multilabel_steps])

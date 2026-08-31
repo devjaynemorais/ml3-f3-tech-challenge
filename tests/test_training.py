@@ -25,16 +25,10 @@ def _config_for(root: Path) -> ExperimentConfig:
 
 
 def _training_frame() -> pd.DataFrame:
-    return pd.DataFrame(
-        {
-            "text": [
-                f"class{class_index} abstract sample{sample_index}"
-                for class_index in range(5)
-                for sample_index in range(4)
-            ],
-            "label": [label for label in CANONICAL_LABELS for _ in range(4)],
-        }
-    )
+    frame = pd.DataFrame({"text": [f"abstract sample {index}" for index in range(20)]})
+    for label_index, label in enumerate(CANONICAL_LABELS):
+        frame[label] = [int(index % 5 == label_index) for index in range(20)]
+    return frame
 
 
 def _write_training_split(config: ExperimentConfig) -> None:
@@ -49,22 +43,44 @@ def test_train_from_processed_uses_only_training_split(tmp_path: Path) -> None:
 
     pipeline, metadata = trainer.train_from_processed(config)
 
-    assert metadata["schema_version"] == 2
+    assert metadata["schema_version"] == 3
     assert metadata["model_type"] == "logistic_regression"
     assert metadata["model_parameters"]["C"] == 0.3
     assert metadata["preprocessing_strategies"] == config.preprocessing.steps
     assert metadata["classes"] == CANONICAL_LABELS
     assert metadata["n_train_samples"] == 20
-    assert set(pipeline.classes_) == set(CANONICAL_LABELS)
+    assert pipeline.predict_proba(["abstract sample 1"]).shape == (1, 5)
 
 
-def test_train_from_processed_rejects_unknown_label(tmp_path: Path) -> None:
+def test_train_from_processed_rejects_non_binary_target(tmp_path: Path) -> None:
     config = _config_for(tmp_path)
     _write_training_split(config)
     path = config.data.processed_path / config.data.train_output_file
     frame = pd.read_csv(path)
-    frame.loc[0, "label"] = "unknown class"
+    frame.loc[0, CANONICAL_LABELS[0]] = 2
     frame.to_csv(path, index=False)
 
-    with pytest.raises(ValueError, match="unknown labels"):
+    with pytest.raises(ValueError, match="non-binary"):
         trainer.train_from_processed(config)
+
+
+def test_warn_if_gpu_unsupported_warns_for_non_gradient_boosting(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setenv("TRAINING_DEVICE", "cuda")
+
+    with caplog.at_level("WARNING"):
+        trainer._warn_if_gpu_unsupported("logistic_regression")
+
+    assert "nao tem backend de" in caplog.text
+
+
+def test_warn_if_gpu_unsupported_silent_for_gradient_boosting(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setenv("TRAINING_DEVICE", "cuda")
+
+    with caplog.at_level("WARNING"):
+        trainer._warn_if_gpu_unsupported("gradient_boosting")
+
+    assert caplog.text == ""

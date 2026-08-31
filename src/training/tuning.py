@@ -12,16 +12,16 @@ from typing import NamedTuple
 
 import pandas as pd
 from joblib import Memory
-from sklearn.model_selection import GridSearchCV, StratifiedKFold
+from sklearn.model_selection import GridSearchCV, KFold
 from sklearn.pipeline import Pipeline
 
 from src.models.classifier import build_pipeline
 from src.utils.config_loader import ExperimentConfig
 
 _CLASSIFIER_PREFIX = {
-    "logistic_regression": "classifier__",
-    "complement_nb": "classifier__",
-    "linear_svm": "classifier__estimator__",
+    "logistic_regression": "classifier__estimator__",
+    "complement_nb": "classifier__estimator__",
+    "linear_svm": "classifier__estimator__estimator__",
 }
 
 
@@ -49,13 +49,13 @@ def build_param_grid(config: ExperimentConfig) -> dict[str, list]:
 
 
 def search_best_pipeline(
-    texts: pd.Series, labels: pd.Series, config: ExperimentConfig
+    texts: pd.Series, labels: pd.DataFrame, config: ExperimentConfig
 ) -> TuningResult:
     """Grid-search the active Strategy; return the refit-on-all-data winner."""
     with TemporaryDirectory() as cache_dir:
         pipeline = build_pipeline(config)
         pipeline.set_params(memory=Memory(location=cache_dir, verbose=0))
-        cv = StratifiedKFold(
+        cv = KFold(
             n_splits=config.tuning.cv_folds,
             shuffle=True,
             random_state=config.split.random_state,

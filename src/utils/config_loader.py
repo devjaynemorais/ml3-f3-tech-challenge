@@ -143,6 +143,7 @@ class ModelConfig(BaseModel):
         "linear_svm",
         "complement_nb",
     ]
+    prediction_threshold: float = Field(gt=0, lt=1)
     logistic_regression: LogisticRegressionConfig
     random_forest: RandomForestConfig
     gradient_boosting: GradientBoostingConfig

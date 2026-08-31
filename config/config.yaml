@@ -50,6 +50,7 @@ features:
 
 model:
   type: logistic_regression
+  prediction_threshold: 0.5
   logistic_regression:
     C: 0.3  # vencedor da busca CV (docs/model_card.md)
     max_iter: 1000
@@ -79,7 +80,7 @@ model:
     norm: false
 
 artifacts:
-  schema_version: 2
+  schema_version: 3
   model_path: models/artifacts
   pipeline_file: triage_pipeline.joblib
   metadata_file: model_metadata.json

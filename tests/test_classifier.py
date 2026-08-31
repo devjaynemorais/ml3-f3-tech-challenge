@@ -5,7 +5,7 @@ import pytest
 import spacy
 
 import src.models.classifier as classifier
-from src.utils.config_loader import CANONICAL_LABELS, ExperimentConfig, load_config
+from src.utils.config_loader import ExperimentConfig, load_config
 from tests.conftest import fake_nlp_with_vectors
 
 TRAIN_TEXTS = [
@@ -13,7 +13,9 @@ TRAIN_TEXTS = [
     for label_index in range(5)
     for sample_index in range(4)
 ]
-TRAIN_LABELS = [label for label in CANONICAL_LABELS for _ in range(4)]
+TRAIN_LABELS = np.asarray(
+    [[int(row % 5 == column) for column in range(5)] for row in range(20)]
+)
 
 
 def _config(model_type: str) -> ExperimentConfig:
@@ -56,8 +58,7 @@ def test_each_model_trains_and_returns_five_probabilities(model_type: str) -> No
     probabilities = pipeline.predict_proba(["class 3 abstract sample"])
 
     assert probabilities.shape == (1, 5)
-    assert probabilities.sum() == pytest.approx(1.0)
-    assert set(pipeline.classes_) == set(CANONICAL_LABELS)
+    assert np.all((probabilities >= 0) & (probabilities <= 1))
 
 
 def test_logistic_regression_strategy_uses_configured_parameters() -> None:
@@ -117,6 +118,46 @@ def test_gradient_boosting_owns_chi2_and_dense_conversion() -> None:
     ]
     assert selector.k_ == min(8, feature_count)
     assert isinstance(transformed, np.ndarray)
+
+
+def test_gradient_boosting_ignores_ambient_gpu_when_device_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unset TRAINING_DEVICE must stay on sklearn even on a GPU-equipped machine."""
+    monkeypatch.delenv("TRAINING_DEVICE", raising=False)
+    monkeypatch.setattr("src.utils.device._nvidia_gpu_present", lambda: True)
+
+    config = load_config().model
+    steps = classifier.ModelFactory.create("gradient_boosting").build_steps(config)
+
+    expected = ["feature_selection", "to_dense", "classifier"]
+    assert [name for name, _ in steps] == expected
+    assert type(steps[-1][1]).__module__.startswith("sklearn")
+
+
+def test_gradient_boosting_uses_xgboost_when_gpu_requested(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TRAINING_DEVICE", "cuda")
+    monkeypatch.setattr("src.utils.device._nvidia_gpu_present", lambda: True)
+
+    config = load_config().model
+    steps = classifier.ModelFactory.create("gradient_boosting").build_steps(config)
+
+    assert [name for name, _ in steps] == ["classifier"]
+    assert type(steps[-1][1]).__module__.startswith("xgboost")
+    assert steps[-1][1].get_params()["device"] == "cuda"
+
+
+def test_gradient_boosting_raises_when_gpu_requested_but_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TRAINING_DEVICE", "gpu")
+    monkeypatch.setattr("src.utils.device._nvidia_gpu_present", lambda: False)
+
+    config = load_config().model
+    with pytest.raises(RuntimeError, match="nenhuma GPU"):
+        classifier.ModelFactory.create("gradient_boosting").build_steps(config)
 
 
 def test_build_pipeline_uses_embeddings_feature_strategy(

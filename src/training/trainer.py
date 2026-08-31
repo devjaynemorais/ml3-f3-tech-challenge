@@ -2,6 +2,15 @@
 
 from __future__ import annotations
 
+# Optional (only the BERT baseline needs it) but must load before pandas: on
+# Windows, torch's native DLL fails to initialize if pandas claims the
+# process's DLL search path first.
+try:
+    import torch  # noqa: F401
+except ImportError:
+    pass
+
+import json
 import logging
 import os
 import sys
@@ -11,7 +20,7 @@ import mlflow.sklearn
 import pandas as pd
 from sklearn.pipeline import Pipeline
 
-from src.data.make_dataset import load_processed_split
+from src.data.make_dataset import DATASET_AUDIT_FILE, load_processed_split
 from src.models.classifier import build_pipeline
 from src.models.registry import save_pipeline
 from src.training.tuning import search_best_pipeline
@@ -31,21 +40,29 @@ def build_metadata(
     config: ExperimentConfig, sample_count: int, model_parameters: dict | None = None
 ) -> dict:
     """Build versioned metadata shared by training and serving."""
+    audit_path = config.data.processed_path / DATASET_AUDIT_FILE
+    dataset_audit = (
+        json.loads(audit_path.read_text(encoding="utf-8"))
+        if audit_path.exists()
+        else None
+    )
     return {
         "schema_version": config.artifacts.schema_version,
         "model_type": config.model.type,
         "feature_type": config.features.type,
         "model_parameters": model_parameters or _active_model_parameters(config),
+        "prediction_threshold": config.model.prediction_threshold,
         "preprocessing_strategies": config.preprocessing.steps,
         "classes": config.data.labels,
         "n_train_samples": sample_count,
+        "dataset_audit": dataset_audit,
     }
 
 
 def train(training: pd.DataFrame, config: ExperimentConfig) -> tuple[Pipeline, dict]:
-    """Fit one configured pipeline on the canonical training split."""
+    """Fit one configured pipeline on the multilabel training split."""
     pipeline = build_pipeline(config)
-    pipeline.fit(training[config.data.text_column], training[config.data.label_column])
+    pipeline.fit(training[config.data.text_column], training[config.data.labels])
     return pipeline, build_metadata(config, len(training))
 
 
@@ -71,7 +88,7 @@ def train_tuned(config: ExperimentConfig) -> tuple[Pipeline, dict]:
     """
     training = load_train_validation(config)
     result = search_best_pipeline(
-        training[config.data.text_column], training[config.data.label_column], config
+        training[config.data.text_column], training[config.data.labels], config
     )
     metadata = build_metadata(config, len(training), result.best_params)
     metadata.update(
@@ -110,6 +127,8 @@ def log_run_to_mlflow(
             mlflow.log_param("model_type", metadata["model_type"])
             mlflow.log_param("feature_type", metadata["feature_type"])
             mlflow.log_param("n_train_samples", metadata["n_train_samples"])
+            if metadata.get("dataset_audit"):
+                mlflow.log_dict(metadata["dataset_audit"], "dataset_audit.json")
             _log_cv_metrics(metadata)
             mlflow.sklearn.log_model(pipeline, artifact_path="model")
             return run.info.run_id
@@ -120,9 +139,23 @@ def log_run_to_mlflow(
         return None
 
 
+def _warn_if_gpu_unsupported(model_type: str) -> None:
+    """TRAINING_DEVICE=cuda/gpu has no effect except for gradient_boosting."""
+    requested = os.environ.get("TRAINING_DEVICE", "").strip().lower()
+    if requested in ("cuda", "gpu") and model_type != "gradient_boosting":
+        logger.warning(
+            "TRAINING_DEVICE=%s pedido, mas model.type=%s nao tem backend de "
+            "GPU; rodando em CPU. GPU real so em gradient_boosting (via "
+            "XGBoost) ou no baseline BERT (scripts/finetune_bert.py).",
+            requested,
+            model_type,
+        )
+
+
 def main() -> None:
     """Train from processed data and persist the pipeline and metadata."""
     config = load_config()
+    _warn_if_gpu_unsupported(config.model.type)
     set_seed(config.split.random_state)
     pipeline, metadata = (
         train_tuned(config) if config.tuning.enabled else train_from_processed(config)

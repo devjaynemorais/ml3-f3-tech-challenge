@@ -11,7 +11,13 @@ TRAIN_TEXTS = [
     for label_index in range(5)
     for sample_index in range(6)
 ]
-TRAIN_LABELS = [label for label in CANONICAL_LABELS for _ in range(6)]
+TRAIN_LABELS = pd.DataFrame(
+    [
+        [int(row % 5 == column) for column in range(5)]
+        for row in range(len(TRAIN_TEXTS))
+    ],
+    columns=CANONICAL_LABELS,
+)
 
 _MINIMAL_GRID = {
     "tfidf": {"max_features": [50]},
@@ -49,7 +55,10 @@ def test_build_param_grid_prefixes_calibrated_svm_as_nested_estimator() -> None:
 
     grid = build_param_grid(config)
 
-    assert grid == {"tfidf__max_features": [50], "classifier__estimator__C": [0.1, 0.3]}
+    assert grid == {
+        "tfidf__max_features": [50],
+        "classifier__estimator__estimator__C": [0.1, 0.3],
+    }
 
 
 def test_build_param_grid_skips_tfidf_params_for_embeddings() -> None:
@@ -60,7 +69,7 @@ def test_build_param_grid_skips_tfidf_params_for_embeddings() -> None:
 
     grid = build_param_grid(config)
 
-    assert grid == {"classifier__C": [0.5, 1.0]}
+    assert grid == {"classifier__estimator__C": [0.5, 1.0]}
 
 
 def test_build_param_grid_skips_untuned_model_types() -> None:
@@ -77,11 +86,9 @@ def test_build_param_grid_skips_untuned_model_types() -> None:
 def test_search_best_pipeline_refits_winner_on_all_data(model_type: str) -> None:
     config = _tuning_config(model_type)
 
-    result = search_best_pipeline(
-        pd.Series(TRAIN_TEXTS), pd.Series(TRAIN_LABELS), config
-    )
+    result = search_best_pipeline(pd.Series(TRAIN_TEXTS), TRAIN_LABELS, config)
 
-    assert set(result.pipeline.classes_) == set(CANONICAL_LABELS)
+    assert result.pipeline.predict_proba([TRAIN_TEXTS[0]]).shape == (1, 5)
     assert 0.0 <= result.cv_mean <= 1.0
     assert result.cv_std >= 0.0
     assert result.best_params
