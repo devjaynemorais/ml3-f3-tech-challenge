@@ -46,35 +46,35 @@
   <tbody>
     <tr>
       <td>Regressão Logística</td>
-      <td>0.6057</td>
-      <td>0.6033</td>
-      <td>0.5928</td>
-      <td>0.5911</td>
-      <td>0.6467</td>
-      <td>0.6073</td>
-      <td>0.6937</td>
+      <td>0.6056</td>
+      <td>0.6025</td>
+      <td>0.5923</td>
+      <td>0.5905</td>
+      <td>0.6463</td>
+      <td>0.6064</td>
+      <td>0.6947</td>
       <td>recall minoritário próximo da média ponderada no split avaliado</td>
     </tr>
     <tr>
       <td>Random Forest</td>
-      <td>0.5213</td>
-      <td>0.5333</td>
-      <td>0.5245</td>
-      <td>0.5215</td>
-      <td>0.5291</td>
-      <td>0.5222</td>
-      <td>0.4112</td>
+      <td>0.5300</td>
+      <td>0.5417</td>
+      <td>0.5327</td>
+      <td>0.5296</td>
+      <td>0.5288</td>
+      <td>0.5254</td>
+      <td>0.3866</td>
       <td>acompanhar de perto; métrica ponderada pode mascarar desempenho</td>
     </tr>
     <tr>
       <td>Gradient Boosting</td>
-      <td>0.5658</td>
-      <td>0.5558</td>
-      <td>0.5448</td>
-      <td>0.5772</td>
-      <td>0.5056</td>
-      <td>0.5193</td>
-      <td>0.2877</td>
+      <td>0.5649</td>
+      <td>0.5583</td>
+      <td>0.5459</td>
+      <td>0.5729</td>
+      <td>0.5038</td>
+      <td>0.5167</td>
+      <td>0.2725</td>
       <td>acompanhar de perto; métrica ponderada pode mascarar desempenho</td>
     </tr>
   </tbody>
@@ -84,17 +84,18 @@
 <figure><img src="figures/confusion_regressao_logistica.png" alt="Matriz de confusão - regressao logistica"><figcaption>Matriz de confusão - regressao logistica</figcaption></figure>
 
   <h2>3. Modelo baseline mais promissor</h2>
-  <p>Modelo candidato neste split: <strong>Regressão Logística</strong>, com macro-F1 de <strong>0.6073</strong>. A justificativa considera macro-F1 e macro-recall, para reduzir o risco de métricas ponderadas esconderem desempenho ruim nas classes menores.</p>
+  <p>Modelo candidato neste split: <strong>Regressão Logística</strong>, com macro-F1 de <strong>0.6064</strong>. A justificativa considera macro-F1 e macro-recall, para reduzir o risco de métricas ponderadas esconderem desempenho ruim nas classes menores.</p>
 
-  <h2>4. Diagnóstico: o teto do benchmark</h2>
+  <h2>4. Diagnóstico: o teto do benchmark single-label</h2>
   <div class="key">
-    <p>O corpus é multirrótulo achatado (ver relatório de EDA). Isso limita estruturalmente a métrica:</p>
+    <p>O corpus é multirrótulo achatado (ver relatório de EDA). Isso limita estruturalmente qualquer modelo que responda um único rótulo por abstract:</p>
     <ul>
       <li>Acurácia exata: <strong>0.603</strong></li>
-      <li>Acurácia in-set (predição entre os rótulos válidos do abstract): <strong>0.851</strong></li>
-      <li><strong>24.8%</strong> do teste é resposta correta contada como erro.</li>
+      <li>Acurácia in-set (predição entre os rótulos válidos do abstract): <strong>0.848</strong></li>
+      <li><strong>24.5%</strong> do teste é resposta correta contada como erro.</li>
       <li>Teto teórico de macro-F1 para modelos de rótulo único: <strong>~0,78</strong></li>
     </ul>
+    <p>Este teto é do enunciado single-label testado neste notebook, não do domínio: o pipeline de produção o contorna reformulando o problema como multilabel (seção 5).</p>
   </div>
   <table border="1" class="dataframe">
   <thead>
@@ -107,12 +108,12 @@
   <tbody>
     <tr>
       <td>1</td>
-      <td>0.781</td>
+      <td>0.778</td>
       <td>658</td>
     </tr>
     <tr>
       <td>2</td>
-      <td>0.407</td>
+      <td>0.410</td>
       <td>459</td>
     </tr>
     <tr>
@@ -129,7 +130,8 @@
 </table>
   <figure><img src="figures/accuracy_by_label_count.png" alt="Acurácia por número de rótulos válidos do abstract"><figcaption>Acurácia por número de rótulos válidos do abstract</figcaption></figure>
 
-  <h2>5. Arquitetura proposta para o MVP</h2>
+  <h2>5. Arquitetura proposta para o MVP (histórico) e o que foi construído</h2>
+  <p>Esta arquitetura foi a proposta exploratória deste notebook. O pipeline de produção seguiu a mesma espinha dorsal (TF-IDF + classificador linear + API + ONNX), mas com o classificador envolvido por um <code>OneVsRestClassifier</code> multilabel — por isso a etapa "Saída" abaixo já reflete um conjunto de rótulos por threshold, não uma única classe.</p>
   <table border="1" class="dataframe">
   <thead>
     <tr style="text-align: right;">
@@ -156,7 +158,7 @@
     </tr>
     <tr>
       <td>Saída</td>
-      <td>Classe prevista com score por classe, permitindo leitura de top-2 quando houver ambiguidade.</td>
+      <td>Conjunto de rótulos cujo score cruza um threshold (ex.: 0.5), cada categoria avaliada de forma independente — não apenas a classe de maior score.</td>
     </tr>
     <tr>
       <td>Endpoint futuro</td>
@@ -184,11 +186,11 @@
     </tr>
     <tr>
       <td>pandas</td>
-      <td>3.0.5</td>
+      <td>2.3.3</td>
     </tr>
     <tr>
       <td>numpy</td>
-      <td>2.4.6</td>
+      <td>1.26.4</td>
     </tr>
     <tr>
       <td>scikit-learn</td>
@@ -208,7 +210,7 @@
     </tr>
     <tr>
       <td>spaCy</td>
-      <td>3.8.16</td>
+      <td>3.7.5</td>
     </tr>
     <tr>
       <td>spaCy model</td>
@@ -258,7 +260,7 @@
     <li>Split único de 20%, sem validação cruzada: diferenças pequenas entre modelos não são conclusivas.</li>
     <li>Amostra de 6,000 registros, não o corpus completo.</li>
     <li>Gradient Boosting exigiu seleção chi2 e conversão densa, ficando em condições diferentes dos demais.</li>
-    <li>Plano de evolução detalhado em <code>docs/plano_melhoria_f1.md</code>.</li>
+    <li>Plano de evolução detalhado em <code>docs/plano_melhoria_f1.md</code>; a direção que de fato foi seguida foi reformular o problema como multilabel (<code>OneVsRestClassifier</code>), não buscar um modelo maior para o subconjunto de rótulo único — ver <code>01_eda_nlp_hospital.ipynb</code> seção 7 e <code>src/models/classifier.py</code>.</li>
   </ul>
 </body>
 </html>

@@ -62,7 +62,7 @@
   <figure><img src="figures/class_distribution.png" alt="Distribuição das classes"><figcaption>Distribuição das classes</figcaption></figure>
 
   <h2>2. Problema de classificação</h2>
-  <p>A tarefa foi enunciada como classificação multiclasse, com uma condição por texto. A seção 4 deste relatório mostra por que essa formulação se sustenta apenas parcialmente.</p>
+  <p>A tarefa é classificação multilabel: um mesmo abstract pode ser válido sob mais de uma condição (seção 1). A seção 4 deste relatório mede o tamanho desse efeito no corpus.</p>
 
   <h2>3. Qualidade dos dados</h2>
   <table border="1" class="dataframe">
@@ -122,8 +122,7 @@
     <p>O corpus é originalmente multirrótulo e foi distribuído em formato achatado — uma linha por par (abstract, condição).</p>
     <ul>
       <li><strong>26%</strong> dos abstracts únicos têm mais de um rótulo válido.</li>
-      <li><strong>35%</strong> das linhas do teste oficial reaproveitam um abstract do treino, sempre cobrando um rótulo diferente.</li>
-      <li>Teto teórico de F1-macro para modelos de rótulo único: <strong>0.7803</strong>.</li>
+      <li><strong>36%</strong> dos abstracts do teste oficial também aparecem no treino; todas as ocorrências desses textos foram removidas somente do treino.</li>
     </ul>
   </div>
   <table border="1" class="dataframe">
@@ -354,7 +353,7 @@
     </tr>
     <tr>
       <td>use</td>
-      <td>2783</td>
+      <td>2791</td>
     </tr>
     <tr>
       <td>result</td>
@@ -421,7 +420,7 @@
     </tr>
     <tr>
       <td>Vocabulário (tokens únicos)</td>
-      <td>23,720</td>
+      <td>23,710</td>
     </tr>
     <tr>
       <td>Type-token ratio</td>
@@ -429,7 +428,7 @@
     </tr>
     <tr>
       <td>Hapax legomena (frequência 1)</td>
-      <td>6,805 (28.7%)</td>
+      <td>6,801 (28.7%)</td>
     </tr>
     <tr>
       <td>Tokens por documento (mediana)</td>
@@ -447,11 +446,11 @@
   <tbody>
     <tr>
       <td>1000</td>
-      <td>0.6448</td>
+      <td>0.6450</td>
     </tr>
     <tr>
       <td>3000</td>
-      <td>0.8394</td>
+      <td>0.8395</td>
     </tr>
     <tr>
       <td>5000</td>
@@ -733,63 +732,63 @@
   <tbody>
     <tr>
       <td>year old</td>
-      <td>76.342107</td>
+      <td>76.627799</td>
     </tr>
     <tr>
       <td>blood pressure</td>
-      <td>71.952191</td>
+      <td>72.217549</td>
     </tr>
     <tr>
       <td>long term</td>
-      <td>71.669983</td>
+      <td>71.691946</td>
     </tr>
     <tr>
       <td>less 05</td>
-      <td>63.854504</td>
+      <td>64.041058</td>
     </tr>
     <tr>
       <td>coronary artery</td>
-      <td>63.078059</td>
+      <td>63.130676</td>
     </tr>
     <tr>
       <td>per cent</td>
-      <td>62.209883</td>
+      <td>62.042131</td>
     </tr>
     <tr>
       <td>patient undergo</td>
-      <td>61.747795</td>
+      <td>61.840495</td>
     </tr>
     <tr>
       <td>case report</td>
-      <td>58.506062</td>
+      <td>58.601097</td>
     </tr>
     <tr>
       <td>report case</td>
-      <td>56.760210</td>
+      <td>56.614394</td>
     </tr>
     <tr>
       <td>two patient</td>
-      <td>51.537473</td>
+      <td>51.693256</td>
     </tr>
     <tr>
       <td>risk factor</td>
-      <td>50.078598</td>
+      <td>49.947433</td>
     </tr>
     <tr>
       <td>one patient</td>
-      <td>49.206368</td>
+      <td>49.202513</td>
     </tr>
     <tr>
       <td>less 001</td>
-      <td>48.077024</td>
+      <td>48.114500</td>
     </tr>
     <tr>
       <td>magnetic resonance</td>
-      <td>46.961827</td>
+      <td>46.957498</td>
     </tr>
     <tr>
       <td>cell carcinoma</td>
-      <td>46.788322</td>
+      <td>46.759607</td>
     </tr>
   </tbody>
 </table>
@@ -865,11 +864,11 @@
     </tr>
     <tr>
       <td>pandas</td>
-      <td>3.0.5</td>
+      <td>2.3.3</td>
     </tr>
     <tr>
       <td>numpy</td>
-      <td>2.4.6</td>
+      <td>1.26.4</td>
     </tr>
     <tr>
       <td>scikit-learn</td>
@@ -889,7 +888,7 @@
     </tr>
     <tr>
       <td>spaCy</td>
-      <td>3.8.16</td>
+      <td>3.7.5</td>
     </tr>
     <tr>
       <td>spaCy model</td>
@@ -905,7 +904,7 @@
   <ul>
     <li>A etapa de pré-processamento textual usa amostra estratificada de 6,000 registros; a análise estrutural usa o corpus completo.</li>
     <li>Dataset em inglês, baseado em abstracts científicos, não em fluxo real de triagem hospitalar.</li>
-    <li>O teto teórico de 0.78 limita o que qualquer modelo de rótulo único pode atingir neste benchmark.</li>
+    <li>O pipeline de produção (fora deste notebook) resolve a ambiguidade documentada aqui treinando um classificador multilabel (<code>OneVsRestClassifier</code>, um binário por categoria) em vez de perseguir um teto de rótulo único.</li>
     <li>Modelagem e avaliação de modelos estão no notebook 02_baseline_modelagem.ipynb.</li>
   </ul>
 </body>
