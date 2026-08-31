@@ -101,21 +101,15 @@ def _set_selection(text: str, model_type: str, features_type: str) -> str:
 
 
 def _run(module: str) -> None:
-    """Run one pipeline stage the same way the Makefile does.
-
-    Deliberately invokes the bare ``python`` on PATH, not ``sys.executable``:
-    poetry is installed there (e.g. Windows Store Python), not inside the
-    project's own venv that ``poetry run`` spawns this script's interpreter
-    from — same reasoning as the Makefile's ``POETRY := python -m poetry``.
-    """
-    print(f"  $ python -m poetry run python -m {module}")
+    """Run one stage with the active venv interpreter, locally or in Docker."""
+    print(f"  $ {sys.executable} -m {module}")
     # Windows consoles default to cp1252, which cannot encode the emoji
     # MLflow prints in its run-URL summary (e.g. "View run ... at: ...") —
     # without this the subprocess exits with UnicodeEncodeError even after
     # training/evaluating successfully.
     env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
     subprocess.run(
-        ["python", "-m", "poetry", "run", "python", "-m", module],
+        [sys.executable, "-m", module],
         cwd=ROOT,
         check=True,
         env=env,
@@ -166,7 +160,7 @@ def _print_summary(results: dict[str, dict]) -> None:
     nan = float("nan")
     print(
         f"\n{'experimento':<46} {'cv_f1_macro':>12} {'test_f1_macro':>14} "
-        f"{'test_acc':>9} {'ml_f1_macro':>12} {'ml_accuracy':>12}"
+        f"{'test_acc':>9} {'ml_accuracy':>12}"
     )
     for result in results.values():
         cv = result.get("cv_macro_f1_mean")
@@ -174,18 +168,23 @@ def _print_summary(results: dict[str, dict]) -> None:
         macro = test.get("macro_avg") or {}
         test_f1 = macro.get("f1")
         accuracy = test.get("accuracy")
+        ml_accuracy = test.get("jaccard_samples")
         print(
             f"{result['label']:<46} "
             f"{cv if cv is not None else nan:>12.4f} "
             f"{test_f1 if test_f1 is not None else nan:>14.4f} "
             f"{accuracy if accuracy is not None else nan:>9.4f} "
-            f"{test.get('multilabel_f1_macro') or nan:>12.4f} "
-            f"{test.get('multilabel_accuracy') or nan:>12.4f}"
+            f"{ml_accuracy if ml_accuracy is not None else nan:>12.4f}"
         )
     print(
-        "\nml_f1_macro/ml_accuracy = metricas multilabel (F1-macro e accuracy "
-        "Jaccard) contra o conjunto completo de rotulos validos por abstract "
-        "— ver docs/metodologia_experimentos.md."
+        "\ntest_f1_macro e ml_accuracy sao as metricas justas: cada abstract "
+        "carrega seu conjunto completo de rotulos validos (agregado em "
+        "aggregate_multilabel_split, src/data/make_dataset.py), entao "
+        "test_f1_macro ja e F1-macro multirrotulo (macro_avg.f1) e ml_accuracy "
+        "e a accuracy Jaccard por amostra (jaccard_samples; Godbole & Sarawagi, "
+        "2004). test_acc (subset_accuracy) exige acerto simultaneo de todos os "
+        "rotulos e costuma subestimar desempenho real — priorize test_f1_macro "
+        "e ml_accuracy. Ver docs/model_card.md#avaliacao."
     )
 
 
