@@ -1,22 +1,26 @@
-"""Validate the Medical Abstracts corpus and persist canonical splits."""
+"""Prepare leakage-safe multilabel splits from the flattened medical corpus."""
 
 from __future__ import annotations
 
+import json
 import logging
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
-from sklearn.model_selection import train_test_split
 
 from src.utils.config_loader import DataConfig, ExperimentConfig, load_config
 
 logger = logging.getLogger(__name__)
+_GROUP_KEY = "_abstract_group_key"
+DATASET_AUDIT_FILE = "dataset_audit.json"
 
 
 @dataclass(frozen=True)
 class CorpusSplits:
-    """Canonical official splits and their dropped-row counts."""
+    """Canonical official row-level splits and their dropped-row counts."""
 
     train: pd.DataFrame
     test: pd.DataFrame
@@ -26,7 +30,7 @@ class CorpusSplits:
 
 @dataclass(frozen=True)
 class SplitSummary:
-    """Paths and counts produced by one dataset preparation run."""
+    """Paths and audit counts produced by dataset preparation."""
 
     train_path: Path
     validation_path: Path
@@ -36,10 +40,17 @@ class SplitSummary:
     test_rows: int
     dropped_train_rows: int
     dropped_test_rows: int
+    overlap_groups_removed_from_train: int
+    overlap_rows_removed_from_train: int
+
+
+def normalize_abstract_key(text: str) -> str:
+    """Build a conservative comparison key without linguistic preprocessing."""
+    normalized = unicodedata.normalize("NFKC", str(text)).casefold()
+    return " ".join(normalized.split())
 
 
 def _source_paths(config: DataConfig) -> dict[str, Path]:
-    """Resolve every required source file."""
     return {
         "train": config.raw_path / config.train_file,
         "test": config.raw_path / config.test_file,
@@ -47,16 +58,9 @@ def _source_paths(config: DataConfig) -> dict[str, Path]:
     }
 
 
-def _ensure_source_files(paths: dict[str, Path]) -> None:
-    """Fail with every missing corpus path in one actionable message."""
-    missing = [str(path) for path in paths.values() if not path.exists()]
-    if missing:
-        joined = ", ".join(missing)
-        raise FileNotFoundError(f"missing Medical Abstracts files: {joined}")
-
-
 def _read_source(path: Path, required: set[str]) -> pd.DataFrame:
-    """Read one CSV and validate its required schema."""
+    if not path.exists():
+        raise FileNotFoundError(f"missing Medical Abstracts file: {path}")
     frame = pd.read_csv(path)
     missing = sorted(required - set(frame.columns))
     if missing:
@@ -64,10 +68,17 @@ def _read_source(path: Path, required: set[str]) -> pd.DataFrame:
     return frame
 
 
+def _validate_mapped_classes(actual: list[str], expected: list[str]) -> None:
+    unknown = sorted(set(actual) - set(expected))
+    if unknown:
+        raise ValueError(f"label mapping contains unknown classes: {unknown}")
+    missing = sorted(set(expected) - set(actual))
+    if missing:
+        raise ValueError(f"label mapping is missing canonical classes: {missing}")
+
+
 def _validate_label_mapping(labels: pd.DataFrame, config: DataConfig) -> dict:
-    """Validate the label table and return its identifier-to-name mapping."""
-    id_column = config.labels_id_column
-    name_column = config.labels_name_column
+    id_column, name_column = config.labels_id_column, config.labels_name_column
     if labels[[id_column, name_column]].isna().any().any():
         raise ValueError("label mapping contains missing identifiers or classes")
     if labels[id_column].duplicated().any():
@@ -78,31 +89,13 @@ def _validate_label_mapping(labels: pd.DataFrame, config: DataConfig) -> dict:
     return dict(zip(labels[id_column], labels[name_column], strict=True))
 
 
-def _validate_mapped_classes(actual: list[str], expected: list[str]) -> None:
-    """Reject unknown or missing classes in the mapping table."""
-    unknown = sorted(set(actual) - set(expected))
-    if unknown:
-        raise ValueError(f"label mapping contains unknown classes: {unknown}")
-    missing = sorted(set(expected) - set(actual))
-    if missing:
-        raise ValueError(f"label mapping is missing canonical classes: {missing}")
-
-
-def _validate_condition_ids(
+def _canonicalize_split(
     frame: pd.DataFrame, mapping: dict, config: DataConfig, split_name: str
-) -> None:
-    """Reject source identifiers that are absent from the label mapping."""
+) -> tuple[pd.DataFrame, int]:
     source_ids = set(frame[config.source_label_column].dropna())
     unknown = sorted(source_ids - set(mapping))
     if unknown:
         raise ValueError(f"{split_name} has unknown condition_label values: {unknown}")
-
-
-def _canonicalize_split(
-    frame: pd.DataFrame, mapping: dict, config: DataConfig, split_name: str
-) -> tuple[pd.DataFrame, int]:
-    """Map source fields to text/label and drop only missing records."""
-    _validate_condition_ids(frame, mapping, config, split_name)
     canonical = pd.DataFrame(
         {
             config.text_column: frame[config.source_text_column],
@@ -116,13 +109,12 @@ def _canonicalize_split(
 
 
 def load_medical_corpus(config: DataConfig) -> CorpusSplits:
-    """Load, validate and canonicalize the official train and test files."""
+    """Load and validate the untouched official CSV files."""
     paths = _source_paths(config)
-    _ensure_source_files(paths)
-    split_schema = {config.source_text_column, config.source_label_column}
+    schema = {config.source_text_column, config.source_label_column}
     label_schema = {config.labels_id_column, config.labels_name_column}
-    train = _read_source(paths["train"], split_schema)
-    test = _read_source(paths["test"], split_schema)
+    train = _read_source(paths["train"], schema)
+    test = _read_source(paths["test"], schema)
     labels = _read_source(paths["labels"], label_schema)
     mapping = _validate_label_mapping(labels, config)
     train_clean, train_dropped = _canonicalize_split(train, mapping, config, "train")
@@ -130,21 +122,70 @@ def load_medical_corpus(config: DataConfig) -> CorpusSplits:
     return CorpusSplits(train_clean, test_clean, train_dropped, test_dropped)
 
 
+def aggregate_multilabel_split(frame: pd.DataFrame, config: DataConfig) -> pd.DataFrame:
+    """Collapse one split independently to one row and five targets per abstract."""
+    text_column, label_column = config.text_column, config.label_column
+    keyed = frame.copy()
+    keyed[_GROUP_KEY] = keyed[text_column].map(normalize_abstract_key)
+    first_text = keyed.groupby(_GROUP_KEY, sort=False)[text_column].first()
+    label_sets = keyed.groupby(_GROUP_KEY, sort=False)[label_column].agg(set)
+    result = pd.DataFrame({text_column: first_text})
+    for label in config.labels:
+        result[label] = label_sets.map(lambda values, item=label: int(item in values))
+    return result.reset_index()
+
+
+def remove_train_test_overlap(
+    training: pd.DataFrame, test: pd.DataFrame
+) -> tuple[pd.DataFrame, int, int]:
+    """Remove from training every abstract group present in the official test."""
+    test_keys = set(test[_GROUP_KEY])
+    overlap = training[_GROUP_KEY].isin(test_keys)
+    removed_groups = int(training.loc[overlap, _GROUP_KEY].nunique())
+    clean = training.loc[~overlap].reset_index(drop=True)
+    return clean, removed_groups, int(overlap.sum())
+
+
+def _multilabel_validation_indices(
+    targets: np.ndarray, validation_size: float, random_state: int
+) -> np.ndarray:
+    """Greedily select a deterministic validation set matching label prevalence."""
+    rng = np.random.default_rng(random_state)
+    n_validation = max(1, round(len(targets) * validation_size))
+    desired = targets.sum(axis=0) * validation_size
+    selected: list[int] = []
+    available = np.ones(len(targets), dtype=bool)
+    current = np.zeros(targets.shape[1], dtype=float)
+    tie_noise = rng.random(len(targets)) * 1e-9
+    frequencies = np.maximum(targets.sum(axis=0), 1)
+    for _ in range(n_validation):
+        deficit = np.maximum(desired - current, 0)
+        scores = (targets * (deficit / frequencies)).sum(axis=1) + tie_noise
+        scores[~available] = -1
+        chosen = int(np.argmax(scores))
+        selected.append(chosen)
+        available[chosen] = False
+        current += targets[chosen]
+    return np.asarray(selected)
+
+
 def split_training_data(
     training: pd.DataFrame, config: ExperimentConfig
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Create validation only from the official training split."""
-    train, validation = train_test_split(
-        training,
-        test_size=config.split.validation_size,
-        random_state=config.split.random_state,
-        stratify=training[config.data.label_column],
+    """Create a deterministic multilabel validation split after grouping."""
+    targets = training[config.data.labels].to_numpy(dtype=int)
+    validation_indices = _multilabel_validation_indices(
+        targets, config.split.validation_size, config.split.random_state
     )
-    return train.reset_index(drop=True), validation.reset_index(drop=True)
+    validation_mask = np.zeros(len(training), dtype=bool)
+    validation_mask[validation_indices] = True
+    return (
+        training.loc[~validation_mask].reset_index(drop=True),
+        training.loc[validation_mask].reset_index(drop=True),
+    )
 
 
 def _output_paths(config: DataConfig) -> tuple[Path, Path, Path]:
-    """Resolve canonical processed split paths."""
     return (
         config.processed_path / config.train_output_file,
         config.processed_path / config.validation_output_file,
@@ -158,55 +199,97 @@ def persist_splits(
     test: pd.DataFrame,
     config: DataConfig,
 ) -> tuple[Path, Path, Path]:
-    """Persist all canonical splits together."""
+    """Persist public processed columns without the internal grouping key."""
     config.processed_path.mkdir(parents=True, exist_ok=True)
-    train_path, validation_path, test_path = _output_paths(config)
-    train.to_csv(train_path, index=False)
-    validation.to_csv(validation_path, index=False)
-    test.to_csv(test_path, index=False)
-    return train_path, validation_path, test_path
+    paths = _output_paths(config)
+    columns = [config.text_column, *config.labels]
+    for frame, path in zip((train, validation, test), paths, strict=True):
+        frame[columns].to_csv(path, index=False)
+    return paths
 
 
 def prepare_dataset(config: ExperimentConfig) -> SplitSummary:
-    """Prepare and persist train, validation and untouched official test data."""
+    """Build independent multilabel splits and purge test overlap from training."""
     corpus = load_medical_corpus(config.data)
-    train, validation = split_training_data(corpus.train, config)
-    paths = persist_splits(train, validation, corpus.test, config.data)
+    test_keys = set(corpus.test[config.data.text_column].map(normalize_abstract_key))
+    raw_overlap_rows = int(
+        corpus.train[config.data.text_column]
+        .map(normalize_abstract_key)
+        .isin(test_keys)
+        .sum()
+    )
+    training = aggregate_multilabel_split(corpus.train, config.data)
+    test = aggregate_multilabel_split(corpus.test, config.data)
+    training, overlap_groups, _ = remove_train_test_overlap(training, test)
+    train, validation = split_training_data(training, config)
+    paths = persist_splits(train, validation, test, config.data)
+    audit = {
+        "policy": "aggregate_splits_separately_and_remove_overlap_from_train",
+        "raw_train_rows": len(corpus.train),
+        "raw_test_rows": len(corpus.test),
+        "overlap_groups_removed_from_train": overlap_groups,
+        "overlap_rows_removed_from_train": raw_overlap_rows,
+        "train_rows": len(train),
+        "validation_rows": len(validation),
+        "test_rows": len(test),
+        "final_overlap_groups": 0,
+        "labels_transferred_between_splits": False,
+    }
+    (config.data.processed_path / DATASET_AUDIT_FILE).write_text(
+        json.dumps(audit, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    audit = {
+        "policy": "aggregate_splits_separately_and_remove_overlap_from_train",
+        "raw_train_rows": len(corpus.train),
+        "raw_test_rows": len(corpus.test),
+        "overlap_groups_removed_from_train": overlap_groups,
+        "overlap_rows_removed_from_train": raw_overlap_rows,
+        "train_rows": len(train),
+        "validation_rows": len(validation),
+        "test_rows": len(test),
+        "final_overlap_groups": 0,
+        "labels_transferred_between_splits": False,
+    }
+    (config.data.processed_path / DATASET_AUDIT_FILE).write_text(
+        json.dumps(audit, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
     return SplitSummary(
         *paths,
         len(train),
         len(validation),
-        len(corpus.test),
+        len(test),
         corpus.dropped_train_rows,
         corpus.dropped_test_rows,
+        overlap_groups,
+        raw_overlap_rows,
     )
 
 
 def load_processed_split(config: ExperimentConfig, filename: str) -> pd.DataFrame:
-    """Load one canonical processed split and validate its labels."""
+    """Load one processed multilabel split and validate binary targets."""
     path = config.data.processed_path / filename
     if not path.exists():
         raise FileNotFoundError(
             f"processed split not found at {path}; run `make dataset`"
         )
-    required = {config.data.text_column, config.data.label_column}
+    required = {config.data.text_column, *config.data.labels}
     frame = _read_source(path, required)
-    unknown = sorted(set(frame[config.data.label_column]) - set(config.data.labels))
-    if unknown:
-        raise ValueError(f"{path.name} contains unknown labels: {unknown}")
+    if not frame[config.data.labels].isin([0, 1]).all().all():
+        raise ValueError(f"{path.name} contains non-binary multilabel targets")
+    if frame[config.data.labels].sum(axis=1).eq(0).any():
+        raise ValueError(f"{path.name} contains an abstract without labels")
     return frame
 
 
 def main() -> None:
-    """CLI entry point used by Make and Airflow."""
+    """Prepare the configured multilabel dataset."""
     summary = prepare_dataset(load_config())
     logger.info(
-        "Processed splits saved: train=%d validation=%d test=%d; dropped=%d/%d",
+        "Multilabel splits: train=%d validation=%d test=%d; overlap removed=%d",
         summary.train_rows,
         summary.validation_rows,
         summary.test_rows,
-        summary.dropped_train_rows,
-        summary.dropped_test_rows,
+        summary.overlap_groups_removed_from_train,
     )
 
 
