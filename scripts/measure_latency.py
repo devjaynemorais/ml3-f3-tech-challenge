@@ -10,7 +10,6 @@ import sys
 import time
 from collections.abc import Callable
 
-import mlflow
 import numpy as np
 
 from src.models.registry import load_metadata
@@ -90,7 +89,14 @@ def _write_results(
 
 
 def log_latency_to_mlflow(run_id: str, comparison: dict) -> None:
-    """Attach the sklearn/ONNX latency comparison to the training's MLflow run."""
+    """Attach the sklearn/ONNX latency comparison to the training's MLflow run.
+
+    Imports mlflow lazily: importing it before the sklearn predictor loads
+    breaks unpickling (spaCy -> thinc -> torch fails to load its native DLL
+    once mlflow has already been imported in the same process).
+    """
+    import mlflow
+
     tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5000")
     if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")

@@ -19,6 +19,7 @@ class _FakePredictor:
         label, scores = self.predict(text)
         return {
             "label": label,
+            "labels": [label],
             "scores": scores,
             "backend": self.backend,
             "preprocessed_text": text.lower(),
@@ -85,9 +86,10 @@ def test_predict_returns_five_canonical_scores() -> None:
 
     assert response.status_code == 200
     assert response.json()["label"] == CANONICAL_LABELS[0]
+    assert response.json()["labels"] == [CANONICAL_LABELS[0]]
     assert response.json()["backend"] == "fake"
     assert list(response.json()["scores"]) == CANONICAL_LABELS
-    assert sum(response.json()["scores"].values()) == pytest.approx(1.0)
+    assert all(0 <= score <= 1 for score in response.json()["scores"].values())
 
 
 @pytest.mark.parametrize("text", ["", "   "])

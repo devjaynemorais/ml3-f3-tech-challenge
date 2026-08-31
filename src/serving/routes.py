@@ -29,6 +29,7 @@ router = APIRouter()
 _DEMO_HTML_PATH = Path(__file__).parent / "static" / "demo.html"
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _EXPERIMENT_COMPARISON_PATH = _PROJECT_ROOT / "metrics" / "experiment_comparison.json"
+_LATENCY_COMPARISON_PATH = _PROJECT_ROOT / "metrics" / "latency_comparison.json"
 _PROMOTED_MODEL_PATH = _PROJECT_ROOT / "models" / "promoted_model.json"
 
 
@@ -59,8 +60,18 @@ def predict(
     except Exception as error:  # noqa: BLE001 - map backend failures to API contract
         logger.error("Unexpected model inference failure (%s)", type(error).__name__)
         raise HTTPException(status_code=500, detail="Model inference failed") from None
-    PREDICTION_COUNT.labels(predicted_label=label).inc()
-    return {"label": label, "scores": scores, "backend": predictor.backend}
+    threshold = load_config().model.prediction_threshold
+    labels = [item for item, score in scores.items() if score >= threshold]
+    if label not in labels:
+        labels.append(label)
+    for selected_label in labels:
+        PREDICTION_COUNT.labels(predicted_label=selected_label).inc()
+    return {
+        "label": label,
+        "labels": labels,
+        "scores": scores,
+        "backend": predictor.backend,
+    }
 
 
 @router.get("/metrics")
@@ -115,6 +126,7 @@ def experiment_results() -> dict:
                 "cv_macro_f1_std": result.get("cv_macro_f1_std"),
                 "test_macro_f1": test.get("macro_avg", {}).get("f1"),
                 "test_accuracy": test.get("accuracy"),
+                "ml_accuracy": test.get("jaccard_samples"),
                 "minority_recall": test.get("minority_class_recall_mean"),
             }
         )
@@ -152,6 +164,18 @@ def experiment_results() -> dict:
         },
         "promoted": promoted,
     }
+
+
+@router.get("/demo/latency-comparison")
+def latency_comparison() -> dict:
+    """Return the persisted sklearn-vs-ONNX latency benchmark."""
+    try:
+        return json.loads(_LATENCY_COMPARISON_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        raise HTTPException(
+            status_code=503,
+            detail="Latency comparison unavailable; run make benchmark-latency first",
+        ) from None
 
 
 @router.get("/demo", response_class=HTMLResponse)

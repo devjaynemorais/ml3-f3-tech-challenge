@@ -223,34 +223,8 @@
   tr.winner { background: var(--accent-wash); }
   .winner-mark { color: var(--accent); font-weight: 700; white-space: nowrap; }
   .results-status { padding: 18px; border: 1px dashed var(--line); border-radius: 8px; color: var(--text-dim); }
-  details.example-card.leak { border-color: var(--bad); }
-  .example-badge.leak { color: var(--bad); }
-
-  /* ── Real duplicate-label examples from the official test set (collapsible) ─ */
-  details.example-card { border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 2px 18px 4px; margin: 10px 0; }
-  details.example-card[open] { padding-bottom: 16px; }
-  details.example-card > summary {
-    cursor: pointer; list-style: none; padding: 13px 0;
-    display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0;
-  }
-  details.example-card > summary::-webkit-details-marker { display: none; }
-  details.example-card > summary::before { content: "▸"; color: var(--accent); flex-shrink: 0; }
-  details.example-card[open] > summary::before { content: "▾"; }
-  details.example-card[open] > summary { border-bottom: 1px solid var(--line); margin-bottom: 12px; padding-bottom: 12px; }
-  .example-summary-text { flex: 1 1 220px; min-width: 0; font-size: 0.85rem; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .example-badge { flex-shrink: 0; font-size: 0.7rem; font-weight: 700; padding: 2px 9px; border-radius: 99px; border: 1px solid currentColor; white-space: nowrap; }
-  .example-badge.hit { color: var(--good); }
-  .example-badge.close { color: var(--text-dim); }
-  .example-quote { margin: 0 0 14px; font-size: 0.85rem; font-style: italic; color: var(--text); border-left: 3px solid var(--line); padding-left: 12px; }
-  .example-cols { display: flex; flex-wrap: wrap; gap: 20px 28px; }
-  .example-col { flex: 1; min-width: 220px; }
-  .example-col-title { display: block; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim); margin-bottom: 7px; }
   .label-chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 99px; padding: 3px 10px 3px 8px; font-size: 0.76rem; margin: 0 6px 6px 0; color: var(--text); }
   .label-chip.chosen { border-color: var(--cat-color, var(--accent)); background: var(--accent-wash); font-weight: 600; }
-  .label-chip .pct { font-family: ui-monospace, monospace; color: var(--text-dim); margin-left: 2px; }
-  .example-verdict { margin: 12px 0 0; font-size: 0.8rem; color: var(--text-dim); border-top: 1px solid var(--line); padding-top: 10px; }
-  .example-verdict b { color: var(--good); }
-  .example-verdict.close b { color: var(--text); }
 
   table .cat-dot { margin-right: 7px; }
 
@@ -326,8 +300,8 @@
       <div class="stepper-dot">1</div>
       <div class="stepper-body">
         <h4>dataset</h4>
-        <p>Valida o schema do Medical Abstracts TC Corpus e separa 10% do treino oficial,
-        estratificado, como validação. O teste oficial (2.888 linhas) fica intocado e
+        <p>Agrega labels por abstract separadamente em treino/teste, remove do treino
+        os 988 textos presentes no teste e só então separa 10% para validação. O teste
         nunca participa do fit.</p>
         <span class="stage-tag">offline</span>
       </div>
@@ -356,9 +330,9 @@
       <div class="stepper-dot">4</div>
       <div class="stepper-body">
         <h4>train</h4>
-        <p>Factory escolhe entre 5 classificadores; padrão é Regressão Logística
-        (C=0.3, class_weight=balanced — vencedora por F1-macro em CV). Busca de
-        hiperparâmetros por CV 3-fold quando <code>tuning.enabled</code>.</p>
+        <p>One-vs-Rest treina uma decisão binária por categoria sobre a Strategy
+        configurada; o padrão é Regressão Logística balanceada. A busca usa F1-macro
+        multilabel em CV 3-fold quando <code>tuning.enabled</code>.</p>
         <span class="stage-tag">offline</span>
       </div>
     </div>
@@ -366,8 +340,9 @@
       <div class="stepper-dot">5</div>
       <div class="stepper-body">
         <h4>evaluate</h4>
-        <p>Accuracy, F1 macro/weighted e recall médio das classes minoritárias em
-        validação e teste, registrados no MLflow junto do run de treino.</p>
+        <p>Métricas multilabel de verdade — Hamming loss, Jaccard por amostra,
+        F1 macro/micro/weighted e recall médio das classes minoritárias — em
+        validação e teste, registradas no MLflow junto do run de treino.</p>
         <span class="stage-tag">offline</span>
       </div>
     </div>
@@ -391,217 +366,27 @@
     <p class="results-status"><span class="spinner"></span>Carregando resultados dos experimentos…</p>
   </div>
 
-  <h2 class="section-title">Resultados reais no teste oficial</h2>
-  <p class="lede">Números de <code>metrics/eval_metrics.json</code> (<code>make evaluate</code>,
-  2.888 abstracts nunca vistos no treino) e de <code>metrics/latency_comparison.json</code>
-  (<code>make benchmark-latency</code>, 5 warm-ups + 200 predições unitárias).</p>
-
-  <div class="stat-group-title">Avaliação estrita — compara contra o único rótulo escolhido no corpus</div>
+  <h2 class="section-title">Decisão de dados: multilabel sem vazamento</h2>
+  <p class="lede">O corpus original guarda uma linha por par
+  <code>(abstract, condição)</code>. A preparação atual agrega os labels dentro de cada
+  split, sem transferir informação entre treino e teste.</p>
   <div class="stats">
-    <div class="stat"><span class="stat-value">61,5%</span><span class="stat-label">accuracy exata</span></div>
-    <div class="stat"><span class="stat-value">61,7%</span><span class="stat-label">F1-macro (usado pra promoção no MLflow)</span></div>
+    <div class="stat"><span class="stat-value">988</span><span class="stat-label">abstracts encontrados nos dois splits</span></div>
+    <div class="stat leak"><span class="stat-value">1.097</span><span class="stat-label">linhas removidas somente do treino</span></div>
+    <div class="stat"><span class="stat-value">8.457</span><span class="stat-label">abstracts em treino + validação</span></div>
+    <div class="stat featured"><span class="stat-value">0</span><span class="stat-label">textos compartilhados após a limpeza</span></div>
   </div>
-
-  <div class="stat-group-title">Avaliação justa — considera todos os rótulos válidos de cada abstract</div>
-  <div class="stats">
-    <div class="stat featured"><span class="stat-value">84,8%</span><span class="stat-label">in_set_accuracy<span class="fair-badge">★ a métrica mais justa aqui</span></span></div>
-    <div class="stat"><span class="stat-value">≈78%</span><span class="stat-label">teto teórico (oráculo multi-rótulo)</span></div>
-    <div class="stat"><span class="stat-value">89,3%</span><span class="stat-label">top_2_accuracy</span></div>
-  </div>
-
   <div class="callout">
-    <p><b>Por que <code>in_set_accuracy</code> é a métrica mais justa aqui:</b> 26% dos
-    abstracts do Medical Abstracts TC Corpus aparecem mais de uma vez, cada ocorrência sob
-    uma condição diferente igualmente válida — o mesmo texto pode ser <code>neoplasms</code>
-    numa linha e <code>general pathological conditions</code> em outra, mas o dataset guarda
-    só uma dessas respostas por linha. Accuracy exata e F1-macro comparam a previsão contra
-    esse único rótulo escolhido e punem o modelo mesmo quando ele acerta uma categoria também
-    válida. <code>in_set_accuracy</code> usa a mesma informação de multirrótulo do corpus pra
-    contar como acerto qualquer previsão que pertença ao conjunto completo de rótulos válidos
-    daquele abstract — corrige o viés da avaliação sem afrouxar o critério artificialmente
-    (diferente do top-2, que é útil pelo contexto de uso, não pela justiça da métrica). Um
-    oráculo que sorteia entre os rótulos válidos de cada abstract atinge F1-macro ≈ 0,78 no
-    teste oficial: esse é o teto real de um classificador single-label neste corpus, não uma
-    limitação do modelo. Diagnóstico completo em <code>docs/plano_melhoria_f1.md</code>.
-    Ressalva importante: como esse conjunto de rótulos válidos junta treino e teste, parte do
-    crédito de <code>in_set_accuracy</code> pode vir de o modelo repetir um rótulo visto no
-    treino, não de generalizar de verdade — é exatamente o que a seção abaixo investiga.</p>
+    <p><b>Por que essa política é segura:</b> treino e teste são processados
+    separadamente. Se um texto aparece no teste, todas as suas ocorrências são
+    descartadas do treino, mesmo que tragam labels A/B/C; o teste mantém somente seus
+    próprios labels, como D. Nenhum label do teste é usado para ensinar, ajustar threshold
+    ou selecionar hiperparâmetros. É preferível não ensinar aquele abstract a ensinar um
+    target contraditório e depois cobrar outro.</p>
   </div>
-
-  <h3>Quando isso É erro de verdade: treino e teste discordam</h3>
-  <p class="lede">Nem toda duplicata é ambiguidade legítima. <b>904 das 2.888 linhas do teste
-  (31,3%)</b> têm um texto que também aparece no treino sob um <b>único rótulo diferente</b> —
-  aqui o teste não tem nenhuma evidência independente de que o rótulo do treino também seria
-  válido. Consultando o modelo real (via <code>/explain</code>) nessas 904 linhas:</p>
-  <div class="stats">
-    <div class="stat leak"><span class="stat-value">54,0%</span><span class="stat-label">repete o rótulo do treino</span></div>
-    <div class="stat"><span class="stat-value">38,6%</span><span class="stat-label">acerta o rótulo do teste</span></div>
-    <div class="stat"><span class="stat-value">7,4%</span><span class="stat-label">não bate com nenhum dos dois</span></div>
-  </div>
-  <div class="callout leak">
-    <p><b>O modelo repete o rótulo do treino quase 1,4x mais do que acerta o do teste
-    (54,0% vs. 38,6%) — sinal real de viés pra memorização,</b> não de ambiguidade natural do
-    domínio. Isso é herdado do split oficial do corpus (Schopf, Braun e Matthes): este projeto
-    mantém o arquivo de teste oficial 100% intocado e nunca re-embaralha treino/teste
-    (<code>src/data/make_dataset.py</code> só separa validação de dentro do treino oficial),
-    então essa sobreposição já vinha nos CSVs publicados. Accuracy de 38,6% neste subconjunto
-    (bem abaixo dos 61,5% gerais) mostra que ele também é, em média, mais difícil — nem tudo
-    aqui é memorização, mas o padrão é claro o suficiente pra não ser coincidência.</p>
-  </div>
-
-  <details class="example-card leak">
-    <summary>
-      <span class="example-summary-text">"Large cystic optic glioma…"</span>
-      <span class="label-chip chosen" style="--cat-color:var(--cat-1)"><span class="cat-dot" style="--cat-color:var(--cat-1)"></span>neoplasms<span class="pct">58,3%</span></span>
-      <span class="example-badge leak">✗ repetiu o treino</span>
-    </summary>
-    <p class="example-quote">"Large cystic optic glioma. A 5 1/2-year-old boy developed a huge cyst in his chiasmal glioma 4 years after radiation therapy. The cyst produced obtundation but was successfully treated."</p>
-    <div class="example-cols">
-      <div class="example-col">
-        <span class="example-col-title">rótulo no treino (texto quase idêntico)</span>
-        <span class="label-chip"><span class="cat-dot" style="--cat-color:var(--cat-1)"></span>neoplasms</span>
-      </div>
-      <div class="example-col">
-        <span class="example-col-title">rótulo real no teste</span>
-        <span class="label-chip"><span class="cat-dot" style="--cat-color:var(--cat-3)"></span>nervous system diseases</span>
-      </div>
-    </div>
-    <p class="example-verdict close"><b>✗ o modelo previu exatamente o rótulo do treino
-    (58,3%), não o do teste.</b> Um glioma é um tumor (por isso <code>neoplasms</code> faz
-    sentido), mas o teste classificou esse caso especificamente como doença do sistema
-    nervoso (é um glioma do nervo óptico/quiasma) — e o modelo não capturou essa distinção,
-    ficou preso à resposta que já tinha visto.</p>
-  </details>
-
-  <details class="example-card leak">
-    <summary>
-      <span class="example-summary-text">"Atrial fibrillation in the elderly: management update…"</span>
-      <span class="label-chip chosen" style="--cat-color:var(--cat-4)"><span class="cat-dot" style="--cat-color:var(--cat-4)"></span>cardiovascular diseases<span class="pct">37,7%</span></span>
-      <span class="example-badge leak">✗ repetiu o treino</span>
-    </summary>
-    <p class="example-quote">"Atrial fibrillation in the elderly: management update. Non-valvular atrial fibrillation is associated with a markedly increased risk of embolic stroke in elderly persons. Evidence is accumulating that anticoagulation with warfarin or aspirin may be effective in reducing this risk."</p>
-    <div class="example-cols">
-      <div class="example-col">
-        <span class="example-col-title">rótulo no treino (texto quase idêntico)</span>
-        <span class="label-chip"><span class="cat-dot" style="--cat-color:var(--cat-4)"></span>cardiovascular diseases</span>
-      </div>
-      <div class="example-col">
-        <span class="example-col-title">rótulo real no teste</span>
-        <span class="label-chip"><span class="cat-dot" style="--cat-color:var(--cat-3)"></span>nervous system diseases</span>
-      </div>
-    </div>
-    <p class="example-verdict close"><b>✗ o modelo previu exatamente o rótulo do treino
-    (37,7%), não o do teste.</b> <code>nervous system diseases</code> ficou em segundo lugar
-    (28,4%) — perto, mas o texto fala de fibrilação atrial (cardiovascular) que aumenta risco
-    de AVC (neurológico); o teste pesou o desfecho neurológico, o modelo pesou o termo que já
-    tinha associado a cardiovascular no treino.</p>
-  </details>
-
-  <h3>Isso já não é erro: ambiguidade legítima só dentro do teste</h3>
-  <p class="lede">Contraste com a seção acima: estes três abstracts aparecem <b>duas vezes
-  cada</b> dentro de <code>data/processed/test.csv</code> — nenhuma das duas ocorrências
-  esteve no treino — com um rótulo diferente em cada linha. Aqui não há treino pra "vazar":
-  é o próprio corpus original registrando a mesma condição sob duas
-  categorias válidas. As previsões abaixo são reais, obtidas em <code>/explain</code>
-  (cole o texto no playground acima pra conferir você mesmo). Clique pra expandir cada um.</p>
-
-  <details class="example-card">
-    <summary>
-      <span class="example-summary-text">"Lipomatous hypertrophy of the interatrial septum…"</span>
-      <span class="label-chip chosen" style="--cat-color:var(--cat-4)"><span class="cat-dot" style="--cat-color:var(--cat-4)"></span>cardiovascular diseases<span class="pct">39,3%</span></span>
-      <span class="example-badge hit">✓ válido</span>
-    </summary>
-    <p class="example-quote">"Lipomatous hypertrophy of the interatrial septum: an unusual intraoperative finding. […] incidental finding in a man of 45 undergoing coronary artery bypass grafting for unstable angina. […] The diagnosis was made on frozen section."</p>
-    <div class="example-cols">
-      <div class="example-col">
-        <span class="example-col-title">rótulos válidos no corpus (2x teste + 1x treino)</span>
-        <span class="label-chip"><span class="cat-dot" style="--cat-color:var(--cat-4)"></span>cardiovascular diseases</span>
-        <span class="label-chip"><span class="cat-dot" style="--cat-color:var(--cat-1)"></span>neoplasms</span>
-        <span class="label-chip"><span class="cat-dot" style="--cat-color:var(--cat-5)"></span>general pathological conditions <span class="pct">(só no treino)</span></span>
-      </div>
-      <div class="example-col">
-        <span class="example-col-title">o modelo previu</span>
-        <span class="label-chip chosen" style="--cat-color:var(--cat-4)"><span class="cat-dot" style="--cat-color:var(--cat-4)"></span>cardiovascular diseases<span class="pct">39,3%</span></span>
-      </div>
-    </div>
-    <p class="example-verdict"><b>✓ bateu com um dos rótulos vistos no teste.</b> Accuracy exata
-    conta como erro se a linha sorteada foi a de <code>neoplasms</code> — a lesão é
-    literalmente um lipoma (tumor benigno) achado durante uma cirurgia cardíaca, então as
-    categorias descrevem o mesmo achado. Note que a previsão não repetiu o rótulo visto no
-    treino (<code>general pathological conditions</code>) — ao contrário dos casos na próxima
-    seção, aqui não há sinal de memorização.</p>
-  </details>
-
-  <details class="example-card">
-    <summary>
-      <span class="example-summary-text">"Would you recognize celiac axis syndrome?…"</span>
-      <span class="label-chip chosen" style="--cat-color:var(--cat-3)"><span class="cat-dot" style="--cat-color:var(--cat-3)"></span>nervous system diseases<span class="pct">29,7%</span></span>
-      <span class="example-badge close">◐ incerto</span>
-    </summary>
-    <p class="example-quote">"Would you recognize celiac axis syndrome? […] Clinical findings include postprandial abdominal pain, weight loss, and an epigastric bruit. Diagnosis is often made by exclusion […]. The role of surgery in treating celiac axis syndrome is controversial."</p>
-    <div class="example-cols">
-      <div class="example-col">
-        <span class="example-col-title">rótulos válidos no corpus</span>
-        <span class="label-chip"><span class="cat-dot" style="--cat-color:var(--cat-2)"></span>digestive system diseases</span>
-        <span class="label-chip"><span class="cat-dot" style="--cat-color:var(--cat-5)"></span>general pathological conditions</span>
-      </div>
-      <div class="example-col">
-        <span class="example-col-title">o modelo previu</span>
-        <span class="label-chip chosen" style="--cat-color:var(--cat-3)"><span class="cat-dot" style="--cat-color:var(--cat-3)"></span>nervous system diseases<span class="pct">29,7%</span></span>
-      </div>
-    </div>
-    <p class="example-verdict close"><b>◐ nenhum dos dois rótulos venceu — mas foi por pouco.</b>
-    nervous 29,7% vs. general pathological 29,0% vs. digestive 22,8%: a incerteza do modelo
-    reflete a ambiguidade genuína do caso, não um erro grosseiro — o texto descreve dor
-    abdominal (digestivo) diagnosticada por exclusão (achado inespecífico), sem nenhum termo
-    claramente neurológico, então esse é o exemplo em que vale desconfiar da própria previsão.</p>
-  </details>
-
-  <details class="example-card">
-    <summary>
-      <span class="example-summary-text">"Abdominal wall pain: an alternative diagnosis…"</span>
-      <span class="label-chip chosen" style="--cat-color:var(--cat-2)"><span class="cat-dot" style="--cat-color:var(--cat-2)"></span>digestive system diseases<span class="pct">61,1%</span></span>
-      <span class="example-badge hit">✓ válido</span>
-    </summary>
-    <p class="example-quote">"Abdominal wall pain: an alternative diagnosis. […] the abdominal wall is another source of symptoms. Some causes of abdominal wall pain are obvious, e.g. hernias, but not so others such as nerve entrapment syndromes. […]"</p>
-    <div class="example-cols">
-      <div class="example-col">
-        <span class="example-col-title">rótulos válidos no corpus</span>
-        <span class="label-chip"><span class="cat-dot" style="--cat-color:var(--cat-2)"></span>digestive system diseases</span>
-        <span class="label-chip"><span class="cat-dot" style="--cat-color:var(--cat-3)"></span>nervous system diseases</span>
-      </div>
-      <div class="example-col">
-        <span class="example-col-title">o modelo previu</span>
-        <span class="label-chip chosen" style="--cat-color:var(--cat-2)"><span class="cat-dot" style="--cat-color:var(--cat-2)"></span>digestive system diseases<span class="pct">61,1%</span></span>
-      </div>
-    </div>
-    <p class="example-verdict"><b>✓ bateu com um dos dois rótulos válidos.</b> A palavra
-    <code>abdominal</code> domina o texto (maior contribuição TF-IDF de longe), então o
-    modelo puxa pro digestivo mesmo o abstract sendo sobre dor de origem nervosa
-    (encarceramento de nervo) — as duas leituras são clinicamente corretas.</p>
-  </details>
-
-  <div class="stat-group-title">Latência por predição</div>
-  <div class="stats">
-    <div class="stat"><span class="stat-value">4,14 ms</span><span class="stat-label">backend sklearn</span></div>
-    <div class="stat"><span class="stat-value">3,37 ms</span><span class="stat-label">backend ONNX (−18,5%)</span></div>
-  </div>
-
-  <div class="tbl-wrap">
-    <table>
-      <thead><tr><th>categoria</th><th class="num">F1 (teste)</th><th class="num">suporte</th></tr></thead>
-      <tbody>
-        <tr><td><span class="cat-dot" style="--cat-color:var(--cat-1)"></span>neoplasms</td><td class="num">74,1%</td><td class="num">633</td></tr>
-        <tr><td><span class="cat-dot" style="--cat-color:var(--cat-2)"></span>digestive system diseases</td><td class="num">59,8%</td><td class="num">299</td></tr>
-        <tr><td><span class="cat-dot" style="--cat-color:var(--cat-3)"></span>nervous system diseases</td><td class="num">61,2%</td><td class="num">385</td></tr>
-        <tr><td><span class="cat-dot" style="--cat-color:var(--cat-4)"></span>cardiovascular diseases</td><td class="num">71,2%</td><td class="num">610</td></tr>
-        <tr><td><span class="cat-dot" style="--cat-color:var(--cat-5)"></span>general pathological conditions</td><td class="num">42,2%</td><td class="num">961</td></tr>
-      </tbody>
-    </table>
-  </div>
-  <p class="lede" style="font-size:0.82rem;"><code>general pathological conditions</code> concentra
-  a maior parte dos erros — é a classe mais associada a rótulos concorrentes no corpus original
-  (metade das suas ocorrências também carrega outra condição válida).</p>
+  <p class="lede">O modelo é realmente multilabel: cinco classificadores binários
+  One-vs-Rest podem selecionar várias categorias simultaneamente. Os scores são
+  independentes e não precisam somar 100%.</p>
 
   <h2 class="section-title">Infraestrutura ao redor do modelo</h2>
   <p class="lede">Cinco peças independentes, não uma sequência — cada uma resolve uma
@@ -636,7 +421,7 @@
       <h4>⚡ ONNX Runtime</h4>
       <p>Só o classificador é convertido — preprocessing e TF-IDF ficam no prefixo
       sklearn. Paridade numérica testada com <code>rtol=1e-5</code>.</p>
-      <span class="port-tag">−18,5% latência</span>
+      <span class="port-tag" id="onnx-speedup-tag">latência medida em make benchmark-latency</span>
     </div>
   </div>
 
@@ -692,6 +477,7 @@ async function loadExperimentResults() {
           <td class="num">${fmtPct(candidate.cv_macro_f1_mean)}</td>
           <td class="num">${fmtPct(candidate.cv_macro_f1_std)}</td>
           <td class="num">${fmtPct(candidate.test_macro_f1)}</td>
+          <td class="num">${fmtPct(candidate.ml_accuracy)}</td>
           <td class="num">${fmtPct(candidate.test_accuracy)}</td>
           <td class="num">${fmtPct(candidate.minority_recall)}</td>
         </tr>`;
@@ -702,16 +488,35 @@ async function loadExperimentResults() {
       ? `O MLflow registrou <code>${escapeHtml(promoted.model_name)}</code> v${escapeHtml(promoted.version)} em <b>${escapeHtml(promoted.stage)}</b>, com ${escapeHtml(promoted.metric)} = ${fmtPct(promoted.value)}.`
       : "O arquivo da promoção ainda não foi gerado; execute <code>make promote</code>.";
     container.innerHTML = `<div class="tbl-wrap"><table>
-      <thead><tr><th>modelo</th><th class="num">CV F1-macro ↑</th><th class="num">desvio CV ↓</th><th class="num">F1 teste</th><th class="num">accuracy teste</th><th class="num">recall minorias</th></tr></thead>
+      <thead><tr><th>modelo</th><th class="num">CV F1-macro ↑</th><th class="num">desvio CV ↓</th><th class="num">F1 teste ★</th><th class="num">accuracy Jaccard ★</th><th class="num">accuracy exata</th><th class="num">recall minorias</th></tr></thead>
       <tbody>${rows}</tbody></table></div>
       <div class="callout"><p><b>Por que ${escapeHtml(winner.label)} venceu:</b>
       teve o maior <code>${escapeHtml(data.selection.primary_metric)}</code> (${fmtPct(winner.cv_macro_f1_mean)}).
       Em caso de empate, vence o menor <code>${escapeHtml(data.selection.tiebreak_metric)}</code>, isto é, o modelo mais estável entre os folds.
       As métricas do teste são exibidas para avaliação final, mas não escolhem o vencedor, preservando o teste oficial.
+      <b>★ métricas justas</b> — F1 teste (F1-macro multirrótulo) e accuracy Jaccard (sobreposição
+      média entre rótulos previstos e verdadeiros por abstract) tratam corretamente abstracts com
+      mais de um rótulo válido; priorize-as. <b>accuracy exata</b> exige acerto simultâneo de
+      todos os rótulos do abstract e tende a subestimar o desempenho real — ver
+      <code>docs/model_card.md#avaliação</code>.
       <b>Latência não participa da promoção atual</b>; ela é medida separadamente no benchmark.
       ${promotionText}</p></div>`;
   } catch (error) {
     container.innerHTML = `<p class="results-status">Não foi possível carregar a comparação: ${escapeHtml(error.message)}. Execute <code>make experiments</code> e recarregue a página.</p>`;
+  }
+}
+
+async function loadLatencyComparison() {
+  const tag = $("#onnx-speedup-tag");
+  try {
+    const response = await fetch("/demo/latency-comparison");
+    if (!response.ok) throw new Error("benchmark ainda não foi gerado");
+    const data = await response.json();
+    const speedupPct = (1 - 1 / data.speedup_x) * 100;
+    const sign = speedupPct >= 0 ? "−" : "+";
+    tag.textContent = `${sign}${fmtNum(Math.abs(speedupPct), 1)}% latência (medido)`;
+  } catch (error) {
+    tag.textContent = "latência medida em make benchmark-latency";
   }
 }
 
@@ -757,10 +562,14 @@ async function loadSampleTexts() {
     $("#sample-chips").innerHTML = chipsHtml;
     document.querySelectorAll(".chip").forEach((btn) => {
       btn.addEventListener("click", () => {
+        // Only fills the textarea — same as typing your own text. The
+        // request only fires on the explicit "Classificar meu texto" click,
+        // so every /explain call is a request the user asked for at that
+        // moment, not an auto-submit hidden inside picking an example.
         setActiveChip(btn);
         $("#text-input").value = decodeURIComponent(btn.dataset.text);
         updateCharCount();
-        runExplain();
+        $("#text-input").focus();
       });
     });
     return true;
@@ -798,12 +607,12 @@ function termsTable(topTerms) {
   </tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
-function rankingBars(scores, label) {
+function rankingBars(scores, labels) {
   const entries = Object.entries(scores).sort((a, b) => b[1] - a[1]);
   const maxScore = Math.max(...entries.map(([, v]) => v), 1e-9);
   return `<div class="bars">` + entries.map(([category, score]) => {
     const pct = Math.max((score / maxScore) * 100, 2);
-    const isPredicted = category === label;
+    const isPredicted = labels.includes(category);
     const color = CATEGORY_COLOR[category] || "var(--text-dim)";
     const check = isPredicted ? `<span class="predicted-check">✓ previsto</span>` : "";
     return `<div class="bar-row${isPredicted ? " predicted" : ""}" style="--cat-color:${color}">
@@ -817,16 +626,18 @@ function rankingBars(scores, label) {
 function verdictHeader(data) {
   const color = CATEGORY_COLOR[data.label] || "var(--text-dim)";
   const confidence = fmtNum((data.scores[data.label] || 0) * 100, 1);
+  const selected = data.labels.map((label) => `<span class="label-chip chosen"
+    style="--cat-color:${CATEGORY_COLOR[label] || "var(--accent)"}"><span class="cat-dot"></span>${escapeHtml(label)}</span>`).join("");
   return `<div class="verdict" style="--cat-color:${color}">
-    <div class="verdict-badge"><span class="cat-dot"></span>${data.label}</div>
-    <div class="verdict-confidence">${confidence}%<small>confiança</small></div>
+    <div class="verdict-badge">${selected}</div>
+    <div class="verdict-confidence">${confidence}%<small>maior score</small></div>
     <div class="verdict-meta">backend <code>${data.backend}</code></div>
   </div>`;
 }
 
 function renderExplain(data, rawText) {
   let html = verdictHeader(data);
-  html += rankingBars(data.scores, data.label);
+  html += rankingBars(data.scores, data.labels);
 
   html += `<details class="how">
     <summary>Como o modelo chegou nessa resposta</summary>
@@ -862,28 +673,37 @@ function renderExplain(data, rawText) {
   }
 }
 
+// Bumped on every runExplain() call; a response only renders if it's still
+// the latest one requested — guards against an earlier click's slower
+// response landing after a later click's and clobbering its result.
+let explainRequestSeq = 0;
+
 async function runExplain() {
   const text = $("#text-input").value.trim();
   if (!text) return;
+  const seq = ++explainRequestSeq;
   const btn = $("#go");
   btn.disabled = true;
   $("#result").innerHTML = `<p class="lede"><span class="spinner"></span>Consultando o modelo…</p>`;
   try {
     const r = await fetch(`/explain?text=${encodeURIComponent(text)}`);
+    if (seq !== explainRequestSeq) return; // a newer request has since been fired
     if (!r.ok) {
       const body = await r.json().catch(() => ({}));
       throw new Error(body.detail || `HTTP ${r.status}`);
     }
     renderExplain(await r.json(), text);
   } catch (e) {
+    if (seq !== explainRequestSeq) return;
     $("#result").innerHTML = `<div class="banner err">Erro ao consultar o modelo: ${e.message}</div>`;
   } finally {
-    updateCharCount();
+    if (seq === explainRequestSeq) updateCharCount();
   }
 }
 
 async function init() {
   loadExperimentResults();
+  loadLatencyComparison();
   const healthy = await checkHealth();
   await loadSampleTexts();
   updateCharCount();
@@ -898,7 +718,10 @@ $("#text-input").addEventListener("input", () => {
   updateCharCount();
 });
 $("#text-input").addEventListener("keydown", (e) => {
-  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); runExplain(); }
+  if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && !$("#go").disabled) {
+    e.preventDefault();
+    runExplain();
+  }
 });
 init();
 </script>
