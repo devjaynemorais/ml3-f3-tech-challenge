@@ -59,7 +59,7 @@ def test_punctuation_strategy_can_remove_numbers_from_config() -> None:
 
 
 def test_lemmatization_strategy_uses_model_lemmas() -> None:
-    strategy = preprocessing.LemmatizationStrategy(_FakeNlp())
+    strategy = preprocessing.LemmatizationStrategy("fake_model", _FakeNlp())
 
     assert strategy.transform("patients were running") == "patient be run"
 
@@ -86,11 +86,25 @@ def test_text_preprocessor_applies_configured_order(
     ]
 
 
+def test_lemmatization_pickle_state_excludes_runtime_pipeline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    strategy = preprocessing.LemmatizationStrategy("fake_model", _FakeNlp())
+    monkeypatch.setattr(preprocessing, "_load_spacy_model", lambda _name: _FakeNlp())
+
+    state = strategy.__getstate__()
+    restored = object.__new__(preprocessing.LemmatizationStrategy)
+    restored.__setstate__(state)
+
+    assert state == {"model_name": "fake_model"}
+    assert restored.transform("patients were running") == "patient be run"
+
+
 def test_strategies_satisfy_runtime_protocol() -> None:
     strategies = [
         preprocessing.UnicodeNormalizationStrategy(),
         preprocessing.PunctuationRemovalStrategy(True),
-        preprocessing.LemmatizationStrategy(_FakeNlp()),
+        preprocessing.LemmatizationStrategy("fake_model", _FakeNlp()),
         preprocessing.StopwordRemovalStrategy(set()),
     ]
 
@@ -128,4 +142,7 @@ def test_factory_reports_missing_spacy_model(
     monkeypatch.setattr(preprocessing.spacy, "load", _missing)
 
     with pytest.raises(RuntimeError, match="spaCy model.*make install"):
-        preprocessing.PreprocessingFactory.create("lemmatization", _config())
+        strategy = preprocessing.PreprocessingFactory.create(
+            "lemmatization", _config()
+        )
+        strategy.transform("patient")

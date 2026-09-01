@@ -16,7 +16,6 @@ models/onnx/
 notebooks/
 docs/
 tests/
-scripts/
 airflow/
 monitoring/
 .env

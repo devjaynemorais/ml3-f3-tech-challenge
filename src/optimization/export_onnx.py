@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -13,8 +15,7 @@ from skl2onnx import convert_sklearn
 from skl2onnx.common.data_types import FloatTensorType
 from sklearn.pipeline import Pipeline
 
-from src.models.artifact_contract import validate_artifact_classes
-from src.models.registry import load_pipeline
+from src.models.registry import load_metadata, load_pipeline
 from src.utils.config_loader import ArtifactConfig, load_config
 
 if TYPE_CHECKING:
@@ -41,8 +42,26 @@ def split_feature_prefix(pipeline: Pipeline) -> tuple[Pipeline, BaseEstimator]:
     return Pipeline(pipeline.steps[:-1]), classifier
 
 
+def _reject_unsupported_backend(classifier: BaseEstimator) -> None:
+    """skl2onnx has no XGBoost converter compatible with the pinned onnx/onnxmltools.
+
+    A GPU-trained (TRAINING_DEVICE=cuda) gradient_boosting model uses XGBoost
+    (see src/models/classifier.py); ONNX export only supports the scikit-learn
+    backends. Serving such a model still works via MODEL_BACKEND=sklearn.
+    """
+    estimators = getattr(classifier, "estimators_", None) or [classifier]
+    is_xgboost = any(type(e).__module__.startswith("xgboost") for e in estimators)
+    if is_xgboost:
+        raise ValueError(
+            "ONNX export nao suporta modelos treinados com XGBoost "
+            "(TRAINING_DEVICE=cuda + model.type=gradient_boosting). Sirva via "
+            "MODEL_BACKEND=sklearn ou retreine em CPU para exportar para ONNX."
+        )
+
+
 def export_classifier_to_onnx(classifier: BaseEstimator) -> ModelProto:
     """Convert one fitted classifier with dense probability output."""
+    _reject_unsupported_backend(classifier)
     n_features = int(classifier.n_features_in_)
     initial_type = [("input", FloatTensorType([None, n_features]))]
     return convert_sklearn(
@@ -69,7 +88,7 @@ def export_pipeline_artifacts(
 ) -> OnnxArtifactPaths:
     """Persist feature prefix, ONNX classifier and probability class order."""
     prefix, classifier = split_feature_prefix(pipeline)
-    classes = validate_artifact_classes(list(classifier.classes_), expected_classes)
+    classes = expected_classes
     onnx_model = export_classifier_to_onnx(classifier)
     onnx_path.mkdir(parents=True, exist_ok=True)
     paths = _artifact_paths(onnx_path, config)
@@ -77,6 +96,30 @@ def export_pipeline_artifacts(
     joblib.dump(prefix, paths.feature_pipeline)
     paths.classes.write_text(json.dumps(classes), encoding="utf-8")
     return paths
+
+
+def log_onnx_artifacts_to_mlflow(run_id: str, paths: OnnxArtifactPaths) -> None:
+    """Attach the exported ONNX serving artifacts to the training's MLflow run.
+
+    Imports mlflow lazily: importing it before skl2onnx crashes the process
+    with a native access violation (conflicting protobuf descriptor pools),
+    and skl2onnx is already loaded by the time this runs.
+    """
+    import mlflow
+
+    tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5000")
+    if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    try:
+        mlflow.set_tracking_uri(tracking_uri)
+        with mlflow.start_run(run_id=run_id):
+            for path in (paths.model, paths.feature_pipeline, paths.classes):
+                mlflow.log_artifact(str(path), artifact_path="onnx")
+    except Exception:
+        logger.warning(
+            "MLflow tracking unavailable at %s; skipping ONNX artifact log",
+            tracking_uri,
+        )
 
 
 def main() -> None:
@@ -89,6 +132,12 @@ def main() -> None:
         pipeline, config.artifacts.onnx_path, config.artifacts, config.data.labels
     )
     logger.info("ONNX classifier exported to %s", paths.model)
+    metadata = load_metadata(
+        config.artifacts.model_path, config.artifacts.metadata_file
+    )
+    run_id = metadata.get("mlflow_run_id")
+    if run_id:
+        log_onnx_artifacts_to_mlflow(run_id, paths)
 
 
 if __name__ == "__main__":

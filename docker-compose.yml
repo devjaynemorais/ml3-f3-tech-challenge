@@ -1,8 +1,8 @@
-# Stack principal do Tech Challenge: API de triagem + Prometheus + Grafana.
+# Stack principal do Tech Challenge: API de triagem + Prometheus + Grafana + MLflow.
 # Uso:
-#   docker compose up --build            # sobe api + prometheus + grafana
+#   docker compose up --build            # sobe api + prometheus + grafana + mlflow
 #   docker compose run --rm train        # treina o modelo (perfil "train")
-#   docker compose run --rm train python -m src.optimization.export_onnx
+#   docker compose run --rm train src.optimization.export_onnx
 services:
   api:
     build:
@@ -14,6 +14,7 @@ services:
     env_file: .env
     volumes:
       - ./models:/app/models:ro
+      - ./metrics:/app/metrics:ro
     networks:
       - ml-network
     healthcheck:
@@ -29,14 +30,33 @@ services:
       target: train
     image: ml3-f3-tech-challenge-train
     env_file: .env
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
     volumes:
       - ./data:/app/data
       - ./models:/app/models
       - ./metrics:/app/metrics
+      - ./mlflow-data:/mlflow-data
     networks:
       - ml-network
+    depends_on:
+      - mlflow
     profiles:
       - train
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.16.0
+    entrypoint: ["mlflow"]
+    command: >
+      server --host 0.0.0.0 --port 5000
+      --backend-store-uri sqlite:///mlflow-data/mlflow.db
+      --default-artifact-root /mlflow-data/artifacts
+    ports:
+      - "${MLFLOW_PORT:-5000}:5000"
+    volumes:
+      - ./mlflow-data:/mlflow-data
+    networks:
+      - ml-network
 
   prometheus:
     image: prom/prometheus:v2.53.0

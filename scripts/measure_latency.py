@@ -5,13 +5,16 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
+import sys
 import time
 from collections.abc import Callable
 
 import numpy as np
 
+from src.models.registry import load_metadata
 from src.serving.model_loader import load_predictor
-from src.utils.config_loader import load_config
+from src.utils.config_loader import ExperimentConfig, load_config
 from src.utils.logging_config import configure_logging
 
 logger = logging.getLogger(__name__)
@@ -35,7 +38,10 @@ def _benchmark(
     values = np.asarray(timings)
     return {
         "mean_ms": float(values.mean()),
+        "p25_ms": float(np.percentile(values, 25)),
         "p50_ms": float(np.percentile(values, 50)),
+        "p75_ms": float(np.percentile(values, 75)),
+        "p90_ms": float(np.percentile(values, 90)),
         "p95_ms": float(np.percentile(values, 95)),
         "p99_ms": float(np.percentile(values, 99)),
     }
@@ -55,12 +61,20 @@ def main() -> None:
     onnx_result = _benchmark(
         lambda: onnx_predictor.predict(SAMPLE_TEXT), arguments.n_runs
     )
-    _write_results(arguments.n_runs, sklearn_result, onnx_result)
-
-
-def _write_results(runs: int, sklearn_result: dict, onnx_result: dict) -> None:
-    """Persist benchmark results under the configured metrics path."""
     config = load_config()
+    comparison = _write_results(config, arguments.n_runs, sklearn_result, onnx_result)
+    metadata = load_metadata(
+        config.artifacts.model_path, config.artifacts.metadata_file
+    )
+    run_id = metadata.get("mlflow_run_id")
+    if run_id:
+        log_latency_to_mlflow(run_id, comparison)
+
+
+def _write_results(
+    config: ExperimentConfig, runs: int, sklearn_result: dict, onnx_result: dict
+) -> dict:
+    """Persist benchmark results under the configured metrics path."""
     comparison = {
         "n_runs": runs,
         "sklearn": sklearn_result,
@@ -71,6 +85,32 @@ def _write_results(runs: int, sklearn_result: dict, onnx_result: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(comparison, indent=2), encoding="utf-8")
     logger.info("Latency comparison saved at %s", path)
+    return comparison
+
+
+def log_latency_to_mlflow(run_id: str, comparison: dict) -> None:
+    """Attach the sklearn/ONNX latency comparison to the training's MLflow run.
+
+    Imports mlflow lazily: importing it before the sklearn predictor loads
+    breaks unpickling (spaCy -> thinc -> torch fails to load its native DLL
+    once mlflow has already been imported in the same process).
+    """
+    import mlflow
+
+    tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5000")
+    if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    try:
+        mlflow.set_tracking_uri(tracking_uri)
+        with mlflow.start_run(run_id=run_id):
+            for backend in ("sklearn", "onnx"):
+                for stat, value in comparison[backend].items():
+                    mlflow.log_metric(f"latency_{backend}_{stat}", value)
+            mlflow.log_metric("latency_speedup_x", comparison["speedup_x"])
+    except Exception:
+        logger.warning(
+            "MLflow tracking unavailable at %s; skipping latency log", tracking_uri
+        )
 
 
 if __name__ == "__main__":

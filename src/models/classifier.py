@@ -7,15 +7,27 @@ from typing import Any, Protocol, runtime_checkable
 import numpy as np
 from scipy import sparse
 from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.feature_selection import SelectKBest, chi2
 from sklearn.linear_model import LogisticRegression
+from sklearn.multiclass import OneVsRestClassifier
+from sklearn.naive_bayes import ComplementNB
 from sklearn.pipeline import Pipeline
+from sklearn.svm import LinearSVC
 from sklearn.utils.validation import check_is_fitted
+from xgboost import XGBClassifier
 
+from src.features.embeddings import SpacyEmbeddingVectorizer
 from src.features.text_preprocessing import TextPreprocessor
-from src.utils.config_loader import ExperimentConfig, FeatureConfig, ModelConfig
+from src.utils.config_loader import (
+    ExperimentConfig,
+    FeatureConfig,
+    GradientBoostingConfig,
+    ModelConfig,
+)
+from src.utils.device import gpu_explicitly_requested, resolve_training_device
 
 
 class AdaptiveChi2Selector(BaseEstimator, TransformerMixin):
@@ -80,11 +92,30 @@ class RandomForestStrategy:
 
 
 class GradientBoostingStrategy:
-    """Own chi-squared selection, dense conversion and Gradient Boosting."""
+    """Own chi-squared selection, dense conversion and Gradient Boosting.
+
+    Switches to GPU-accelerated XGBoost only on an EXPLICIT
+    TRAINING_DEVICE=cuda/gpu, never via auto-detection: scikit-learn's
+    GradientBoostingClassifier has no GPU backend, but swapping in XGBoost is
+    an algorithm change, not just a speed knob, so picking it based on
+    ambient hardware would make training results depend on which machine
+    happens to run it. XGBoost also handles the sparse TF-IDF matrix
+    natively, so the chi-squared selection and dense conversion steps
+    (needed only for sklearn's dense-only GB) are skipped on that path.
+    """
 
     def build_steps(self, config: ModelConfig) -> list[tuple[str, BaseEstimator]]:
         """Create the complete Gradient Boosting-specific suffix."""
         parameters = config.gradient_boosting
+        if gpu_explicitly_requested():
+            resolve_training_device()  # raises a clear error if no GPU is present
+            return [("classifier", _build_xgboost_classifier(parameters))]
+        return self._sklearn_steps(parameters)
+
+    def _sklearn_steps(
+        self, parameters: GradientBoostingConfig
+    ) -> list[tuple[str, BaseEstimator]]:
+        """Build the CPU-only sklearn Gradient Boosting suffix."""
         classifier = GradientBoostingClassifier(
             n_estimators=parameters.n_estimators,
             learning_rate=parameters.learning_rate,
@@ -98,6 +129,46 @@ class GradientBoostingStrategy:
         ]
 
 
+def _build_xgboost_classifier(parameters: GradientBoostingConfig) -> XGBClassifier:
+    """Build the GPU-accelerated XGBoost classifier for one binary label."""
+    return XGBClassifier(
+        n_estimators=parameters.n_estimators,
+        learning_rate=parameters.learning_rate,
+        max_depth=parameters.max_depth,
+        random_state=parameters.random_state,
+        tree_method="hist",
+        device="cuda",
+    )
+
+
+class LinearSvmStrategy:
+    """Build a calibrated Linear SVM classifier step.
+
+    ``LinearSVC`` has no ``predict_proba``; ``CalibratedClassifierCV`` adds
+    Platt-scaled probabilities on top, required by the serving contract.
+    """
+
+    def build_steps(self, config: ModelConfig) -> list[tuple[str, BaseEstimator]]:
+        """Create a calibrated Linear SVM from its typed configuration."""
+        parameters = config.linear_svm.model_dump()
+        cv = parameters.pop("calibration_cv")
+        base = LinearSVC(**parameters)
+        calibrated = CalibratedClassifierCV(base, method="sigmoid", cv=cv)
+        return [("classifier", calibrated)]
+
+
+class ComplementNbStrategy:
+    """Build the Complement Naive Bayes classifier step.
+
+    Requires non-negative input — pairs with TF-IDF, not word embeddings.
+    """
+
+    def build_steps(self, config: ModelConfig) -> list[tuple[str, BaseEstimator]]:
+        """Create Complement Naive Bayes from its typed configuration."""
+        parameters = config.complement_nb.model_dump()
+        return [("classifier", ComplementNB(**parameters))]
+
+
 class ModelFactory:
     """Create one supported model Strategy by name."""
 
@@ -108,6 +179,8 @@ class ModelFactory:
             "logistic_regression": LogisticRegressionStrategy,
             "random_forest": RandomForestStrategy,
             "gradient_boosting": GradientBoostingStrategy,
+            "linear_svm": LinearSvmStrategy,
+            "complement_nb": ComplementNbStrategy,
         }
         if model_type not in strategies:
             raise ValueError(f"unknown model type: {model_type!r}")
@@ -123,11 +196,23 @@ def build_tfidf(config: FeatureConfig) -> TfidfVectorizer:
     )
 
 
+def build_features_step(config: FeatureConfig) -> tuple[str, BaseEstimator]:
+    """Build the configured feature Strategy: TF-IDF or word embeddings."""
+    if config.type == "embeddings":
+        return "embeddings", SpacyEmbeddingVectorizer(config.embeddings.spacy_model)
+    return "tfidf", build_tfidf(config)
+
+
 def build_pipeline(config: ExperimentConfig) -> Pipeline:
-    """Compose preprocessing, TF-IDF and the selected model Strategy."""
+    """Compose preprocessing, features and one binary classifier per label."""
     common_steps: list[tuple[str, BaseEstimator]] = [
         ("preprocessor", TextPreprocessor(config.preprocessing)),
-        ("tfidf", build_tfidf(config.features)),
+        build_features_step(config.features),
     ]
     strategy = ModelFactory.create(config.model.type)
-    return Pipeline([*common_steps, *strategy.build_steps(config.model)])
+    model_steps = strategy.build_steps(config.model)
+    step_name, estimator = model_steps[-1]
+    if step_name != "classifier":
+        raise ValueError("the final model step must be named 'classifier'")
+    multilabel_steps = [*model_steps[:-1], (step_name, OneVsRestClassifier(estimator))]
+    return Pipeline([*common_steps, *multilabel_steps])

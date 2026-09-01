@@ -57,6 +57,11 @@ ipython_config.py
 .venv
 env/
 venv/
+tc3/
+
+# Artefatos locais do Postman (VS Code extension), não fazem parte da collection versionada
+postman/requests/.postman/
+postman/requests/postman/
 ENV/
 env.bak/
 venv.bak/
@@ -89,8 +94,10 @@ data/external/*
 # Modelos e artefatos treinados
 models/artifacts/*
 models/onnx/*
+models/bert_experiment/
 !models/artifacts/.gitkeep
 !models/onnx/.gitkeep
+models/promoted_model.json
 
 # Métricas geradas em runtime
 metrics/*.json
@@ -105,9 +112,25 @@ airflow/airflow.db
 # Grafana (estado runtime do container)
 monitoring/grafana/data/
 
+# MLflow — container (docker compose up mlflow)
+mlflow-data/
+
+# MLflow — local (make mlflow, sem Docker)
+mlflow.db
+mlruns/
+mlartifacts/
+
 # Claude Code agent skills e tooling local
 .agents/
 data/skills/
 skills-lock.json
+# Anotações locais de progresso dos agentes (não são documentação da entrega)
 docs/todo.md
+docs/todo-*.md
+docs/progresso*.md
+docs/progress*.md
+docs/status*.md
+docs/notes*.md
+docs/superpowers/plans/
 .claude/settings.local.json
+routine.md

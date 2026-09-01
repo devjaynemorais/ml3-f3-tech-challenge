@@ -38,3 +38,11 @@ def load_pipeline(artifacts_path: Path, pipeline_file: str) -> Pipeline:
     if not isinstance(pipeline, Pipeline):
         raise TypeError(f"artifact at {model_path} is not an sklearn Pipeline")
     return pipeline
+
+
+def load_metadata(artifacts_path: Path, metadata_file: str) -> dict:
+    """Load persisted training metadata, or an empty dict if not saved yet."""
+    metadata_path = artifacts_path / metadata_file
+    if not metadata_path.exists():
+        return {}
+    return json.loads(metadata_path.read_text(encoding="utf-8"))

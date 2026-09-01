@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -31,7 +32,12 @@ def _fitted_pipeline(labels: list[str] | None = None):
             for sample in range(3)
         ]
     )
-    targets = pd.Series([label for label in training_labels for _ in range(3)])
+    targets = np.asarray(
+        [
+            [int(row // 3 == column) for column in range(len(training_labels))]
+            for row in range(len(texts))
+        ]
+    )
     return pipeline.fit(texts, targets)
 
 
@@ -60,7 +66,7 @@ def test_load_predictor_uses_runtime_artifact_path(
     assert predictor.backend == "sklearn"
     assert label in CANONICAL_LABELS
     assert list(scores) == CANONICAL_LABELS
-    assert sum(scores.values()) == pytest.approx(1.0)
+    assert all(0 <= score <= 1 for score in scores.values())
 
 
 def test_explicit_backend_overrides_runtime_setting(
@@ -75,11 +81,11 @@ def test_explicit_backend_overrides_runtime_setting(
     assert predictor.backend == "sklearn"
 
 
-def test_old_three_class_artifact_is_rejected() -> None:
+def test_old_three_class_artifact_is_rejected_at_prediction() -> None:
     pipeline = _fitted_pipeline(["normal", "atencao", "urgente"])
-
-    with pytest.raises(ValueError, match="artifact classes"):
-        model_loader.SklearnPredictor(pipeline, CANONICAL_LABELS)
+    predictor = model_loader.SklearnPredictor(pipeline, CANONICAL_LABELS)
+    with pytest.raises(ValueError, match="probability columns"):
+        predictor.predict("abstract")
 
 
 def test_duplicate_or_missing_artifact_classes_are_rejected() -> None:
@@ -92,3 +98,18 @@ def test_duplicate_or_missing_artifact_classes_are_rejected() -> None:
 def test_load_predictor_rejects_unknown_backend() -> None:
     with pytest.raises(ValueError, match="unknown model backend"):
         model_loader.load_predictor(backend="tensorflow")
+
+
+def test_sklearn_explain_exposes_preprocessing_and_top_terms() -> None:
+    predictor = model_loader.SklearnPredictor(_fitted_pipeline(), CANONICAL_LABELS)
+
+    result = predictor.explain("Class2 Abstract Sample")
+
+    assert result["label"] in CANONICAL_LABELS
+    assert result["backend"] == "sklearn"
+    assert result["preprocessed_text"] == "class2 abstract sample"
+    assert result["top_terms"], "linear model over TF-IDF must expose top terms"
+    top_term = result["top_terms"][0]
+    assert {"term", "tfidf", "weight", "contribution"} == set(top_term)
+    contributions = [term["contribution"] for term in result["top_terms"]]
+    assert contributions == sorted(contributions, reverse=True)

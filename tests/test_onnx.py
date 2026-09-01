@@ -49,7 +49,9 @@ def _fitted_pipeline(config: ExperimentConfig):
     texts = pd.Series(
         [f"{sample} training{index}" for sample in SAMPLES for index in range(4)]
     )
-    labels = pd.Series([label for label in CANONICAL_LABELS for _ in range(4)])
+    labels = np.asarray(
+        [[int(row // 4 == column) for column in range(5)] for row in range(len(texts))]
+    )
     return build_pipeline(config).fit(texts, labels)
 
 

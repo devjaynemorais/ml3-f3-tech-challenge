@@ -1,0 +1,266 @@
+
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <title>Relatório de Modelagem Baseline — Abstracts Médicos</title>
+  <style>
+    body { font-family: Arial, sans-serif; line-height: 1.5; margin: 40px; color: #222; }
+    h1, h2 { color: #1f4e79; }
+    table { border-collapse: collapse; width: 100%; margin: 16px 0; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    th { background: #f2f5f7; }
+    img { max-width: 100%; height: auto; border: 1px solid #ddd; }
+    figure { margin: 20px 0; }
+    figcaption { font-size: 0.9em; color: #555; }
+    .note { background: #fff8e1; padding: 12px; border-left: 4px solid #d39e00; }
+    .key { background: #e8f4fd; padding: 12px; border-left: 4px solid #1f4e79; }
+  </style>
+</head>
+<body>
+  <h1>Relatório de Modelagem Baseline — Classificação de Abstracts Médicos</h1>
+  <p class="note">Relatório exploratório. Complementa o relatório de EDA em <code>eda_nlp_hospital.html</code>. Não representa o pipeline de produção nem validação clínica.</p>
+
+  <h2>1. Setup experimental</h2>
+  <ul>
+    <li>Amostra estratificada de 6,000 registros do corpus consolidado.</li>
+    <li>Split estratificado de 20% para teste, com <code>random_state=42</code>.</li>
+    <li>TF-IDF com <code>max_features=5000</code>, <code>ngram_range=(1, 2)</code>, ajustado somente no treino.</li>
+  </ul>
+
+  <h2>2. Comparação entre arquiteturas baseline</h2>
+  <table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>modelo</th>
+      <th>weighted_precision</th>
+      <th>weighted_recall</th>
+      <th>weighted_f1</th>
+      <th>macro_precision</th>
+      <th>macro_recall</th>
+      <th>macro_f1</th>
+      <th>recall_medio_classes_minoritarias</th>
+      <th>observacao_classes_minoritarias</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Regressão Logística</td>
+      <td>0.6056</td>
+      <td>0.6025</td>
+      <td>0.5923</td>
+      <td>0.5905</td>
+      <td>0.6463</td>
+      <td>0.6064</td>
+      <td>0.6947</td>
+      <td>recall minoritário próximo da média ponderada no split avaliado</td>
+    </tr>
+    <tr>
+      <td>Random Forest</td>
+      <td>0.5300</td>
+      <td>0.5417</td>
+      <td>0.5327</td>
+      <td>0.5296</td>
+      <td>0.5288</td>
+      <td>0.5254</td>
+      <td>0.3866</td>
+      <td>acompanhar de perto; métrica ponderada pode mascarar desempenho</td>
+    </tr>
+    <tr>
+      <td>Gradient Boosting</td>
+      <td>0.5649</td>
+      <td>0.5583</td>
+      <td>0.5459</td>
+      <td>0.5729</td>
+      <td>0.5038</td>
+      <td>0.5167</td>
+      <td>0.2725</td>
+      <td>acompanhar de perto; métrica ponderada pode mascarar desempenho</td>
+    </tr>
+  </tbody>
+</table>
+  <figure><img src="figures/confusion_gradient_boosting.png" alt="Matriz de confusão - gradient boosting"><figcaption>Matriz de confusão - gradient boosting</figcaption></figure>
+<figure><img src="figures/confusion_random_forest.png" alt="Matriz de confusão - random forest"><figcaption>Matriz de confusão - random forest</figcaption></figure>
+<figure><img src="figures/confusion_regressao_logistica.png" alt="Matriz de confusão - regressao logistica"><figcaption>Matriz de confusão - regressao logistica</figcaption></figure>
+
+  <h2>3. Modelo baseline mais promissor</h2>
+  <p>Modelo candidato neste split: <strong>Regressão Logística</strong>, com macro-F1 de <strong>0.6064</strong>. A justificativa considera macro-F1 e macro-recall, para reduzir o risco de métricas ponderadas esconderem desempenho ruim nas classes menores.</p>
+
+  <h2>4. Diagnóstico: o teto do benchmark single-label</h2>
+  <div class="key">
+    <p>O corpus é multirrótulo achatado (ver relatório de EDA). Isso limita estruturalmente qualquer modelo que responda um único rótulo por abstract:</p>
+    <ul>
+      <li>Acurácia exata: <strong>0.603</strong></li>
+      <li>Acurácia in-set (predição entre os rótulos válidos do abstract): <strong>0.848</strong></li>
+      <li><strong>24.5%</strong> do teste é resposta correta contada como erro.</li>
+      <li>Teto teórico de macro-F1 para modelos de rótulo único: <strong>~0,78</strong></li>
+    </ul>
+    <p>Este teto é do enunciado single-label testado neste notebook, não do domínio: o pipeline de produção o contorna reformulando o problema como multilabel (seção 5).</p>
+  </div>
+  <table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>rotulos_validos_no_corpus</th>
+      <th>acuracia</th>
+      <th>abstracts</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>1</td>
+      <td>0.778</td>
+      <td>658</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td>0.410</td>
+      <td>459</td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td>0.284</td>
+      <td>81</td>
+    </tr>
+    <tr>
+      <td>4</td>
+      <td>0.000</td>
+      <td>2</td>
+    </tr>
+  </tbody>
+</table>
+  <figure><img src="figures/accuracy_by_label_count.png" alt="Acurácia por número de rótulos válidos do abstract"><figcaption>Acurácia por número de rótulos válidos do abstract</figcaption></figure>
+
+  <h2>5. Arquitetura proposta para o MVP (histórico) e o que foi construído</h2>
+  <p>Esta arquitetura foi a proposta exploratória deste notebook. O pipeline de produção seguiu a mesma espinha dorsal (TF-IDF + classificador linear + API + ONNX), mas com o classificador envolvido por um <code>OneVsRestClassifier</code> multilabel — por isso a etapa "Saída" abaixo já reflete um conjunto de rótulos por threshold, não uma única classe.</p>
+  <table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>etapa</th>
+      <th>descricao</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Entrada</td>
+      <td>Texto médico digitado, enviado por formulário ou recebido por integração.</td>
+    </tr>
+    <tr>
+      <td>Pré-processamento</td>
+      <td>Normalização, limpeza leve, stopwords e lematização documentada.</td>
+    </tr>
+    <tr>
+      <td>Vetorização</td>
+      <td>TF-IDF (max_features=5000, 1-2 gramas) ajustado somente no treino e persistido com o modelo.</td>
+    </tr>
+    <tr>
+      <td>Classificador</td>
+      <td>Baseline candidato: Regressão Logística, sujeito a validação cruzada e comparação futura.</td>
+    </tr>
+    <tr>
+      <td>Saída</td>
+      <td>Conjunto de rótulos cujo score cruza um threshold (ex.: 0.5), cada categoria avaliada de forma independente — não apenas a classe de maior score.</td>
+    </tr>
+    <tr>
+      <td>Endpoint futuro</td>
+      <td>API REST para predição em tempo real, com validação de entrada e monitoramento.</td>
+    </tr>
+    <tr>
+      <td>Refatoração antes de produção</td>
+      <td>Separar pipeline, versionar artefatos, testar, monitorar drift e revisar riscos clínicos.</td>
+    </tr>
+  </tbody>
+</table>
+
+  <h2>6. Bibliotecas usadas no desenvolvimento</h2>
+  <table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>biblioteca</th>
+      <th>versao</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>python</td>
+      <td>3.11</td>
+    </tr>
+    <tr>
+      <td>pandas</td>
+      <td>2.3.3</td>
+    </tr>
+    <tr>
+      <td>numpy</td>
+      <td>1.26.4</td>
+    </tr>
+    <tr>
+      <td>scikit-learn</td>
+      <td>1.7.2</td>
+    </tr>
+    <tr>
+      <td>matplotlib</td>
+      <td>3.11.1</td>
+    </tr>
+    <tr>
+      <td>seaborn</td>
+      <td>0.13.2</td>
+    </tr>
+    <tr>
+      <td>nltk</td>
+      <td>3.10.3</td>
+    </tr>
+    <tr>
+      <td>spaCy</td>
+      <td>3.7.5</td>
+    </tr>
+    <tr>
+      <td>spaCy model</td>
+      <td>en_core_web_sm</td>
+    </tr>
+  </tbody>
+</table>
+
+  <h2>7. Bibliotecas candidatas para produção</h2>
+  <table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>biblioteca</th>
+      <th>uso</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>pandas</td>
+      <td>ingestão offline e auditoria de dados</td>
+    </tr>
+    <tr>
+      <td>scikit-learn</td>
+      <td>pipeline TF-IDF + classificador baseline</td>
+    </tr>
+    <tr>
+      <td>joblib</td>
+      <td>persistência do pipeline treinado</td>
+    </tr>
+    <tr>
+      <td>FastAPI</td>
+      <td>endpoint de predição</td>
+    </tr>
+    <tr>
+      <td>prometheus-client</td>
+      <td>métricas de API em produção</td>
+    </tr>
+    <tr>
+      <td>onnxruntime</td>
+      <td>redução de latência do classificador</td>
+    </tr>
+  </tbody>
+</table>
+
+  <h2>8. Limitações e próximos passos</h2>
+  <ul>
+    <li>Split único de 20%, sem validação cruzada: diferenças pequenas entre modelos não são conclusivas.</li>
+    <li>Amostra de 6,000 registros, não o corpus completo.</li>
+    <li>Gradient Boosting exigiu seleção chi2 e conversão densa, ficando em condições diferentes dos demais.</li>
+    <li>Plano de evolução detalhado em <code>docs/plano_melhoria_f1.md</code>; a direção que de fato foi seguida foi reformular o problema como multilabel (<code>OneVsRestClassifier</code>), não buscar um modelo maior para o subconjunto de rótulo único — ver <code>01_eda_nlp_hospital.ipynb</code> seção 7 e <code>src/models/classifier.py</code>.</li>
+  </ul>
+</body>
+</html>

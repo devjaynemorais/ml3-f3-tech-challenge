@@ -1,0 +1,752 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<title>Medical Text Classifier — Demo ao vivo</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    --ink: #0d1a1c; --paper: #e6ece9; --paper-2: #dbe4e0;
+    --text: #16211f; --text-dim: #52625d;
+    --accent: #1f7a6c; --accent-soft: #9bc9bf; --accent-wash: rgba(31, 122, 108, 0.08);
+    --good: #337a55; --bad: #a8433c; --bad-wash: rgba(168, 67, 60, 0.08);
+    --line: rgba(22, 33, 31, 0.14); --card: #ffffffb0;
+    --shadow: 0 1px 2px rgba(8, 20, 16, 0.06);
+    --shadow-lift: 0 6px 20px rgba(8, 20, 16, 0.12);
+    --bar-muted: #b7c3bd;
+    /* categorical palette — fixed hue per canonical class, never by rank/score */
+    --cat-1: #2a78d6; /* neoplasms */
+    --cat-2: #eb6834; /* digestive system diseases */
+    --cat-3: #1baf7a; /* nervous system diseases */
+    --cat-4: #eda100; /* cardiovascular diseases */
+    --cat-5: #e87ba4; /* general pathological conditions */
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --text: #dfe9e5; --text-dim: #9bafa5;
+      --accent: #4fb39f; --accent-soft: #2c5f53; --accent-wash: rgba(79, 179, 159, 0.14);
+      --good: #6fbf8f; --bad: #d3796a; --bad-wash: rgba(211, 121, 106, 0.14);
+      --line: rgba(223, 233, 229, 0.14); --card: #10201d99;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+      --shadow-lift: 0 8px 24px rgba(0, 0, 0, 0.4);
+      --bar-muted: #3c4a46;
+      --cat-1: #3987e5; --cat-2: #d95926; --cat-3: #199e70; --cat-4: #c98500; --cat-5: #d55181;
+      color-scheme: dark;
+    }
+    body { background: var(--ink); }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    font-size: 16px; line-height: 1.6;
+  }
+  main { max-width: 1040px; margin: 0 auto; padding: 0 20px 80px; }
+  h1, h2, h3, h4 { font-family: "Iowan Old Style", Charter, Georgia, "Noto Serif", serif; font-weight: 600; margin: 0 0 6px; }
+  h1 { font-size: 2rem; letter-spacing: -0.01em; }
+  h2.section-title { font-size: 1.3rem; margin-top: 52px; }
+  h3 { font-size: 1.05rem; margin-top: 20px; }
+  p { margin: 8px 0; }
+  .lede { color: var(--text-dim); max-width: 68ch; }
+  .eyebrow { font-family: ui-monospace, monospace; font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  code { font-family: ui-monospace, monospace; background: var(--line); padding: 1px 5px; border-radius: 3px; font-size: 0.88em; }
+
+  .hero { margin: 0 -20px 8px; padding: 40px 20px 22px; background: linear-gradient(180deg, var(--accent-wash), transparent); border-radius: 0 0 20px 20px; }
+
+  .disclaimer { border-left: 3px solid var(--bad); background: var(--card); border-radius: 0 6px 6px 0; padding: 10px 14px; margin: 16px 0 0; font-size: 0.82rem; color: var(--text-dim); max-width: 68ch; }
+
+  .banner { border: 1px solid var(--accent); background: var(--card); border-radius: 6px; padding: 14px 16px; margin: 18px 0; font-size: 0.9rem; }
+  .banner.err { border-color: var(--bad); color: var(--bad); }
+
+  /* ── Playground: input + live output side by side ─────────────────────── */
+  .playground { display: grid; grid-template-columns: 340px 1fr; gap: 28px; align-items: start; margin: 24px 0; }
+  @media (max-width: 860px) { .playground { grid-template-columns: 1fr; } }
+
+  .panel { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 20px 22px; }
+  .panel-head { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+  .panel-head .idx {
+    flex-shrink: 0; width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: var(--paper);
+    display: flex; align-items: center; justify-content: center;
+    font-family: ui-monospace, monospace; font-size: 0.7rem; font-weight: 700;
+  }
+  .panel-head h2 { margin: 0; font-size: 1rem; font-family: inherit; font-weight: 700; color: var(--text); }
+  .panel-hint { margin: 0 0 14px 32px; font-size: 0.8rem; color: var(--text-dim); }
+
+  .input-choice { margin-top: 14px; }
+  .input-choice.primary-choice { padding: 16px; border: 2px solid var(--accent); border-radius: 8px; background: var(--accent-wash); }
+  .choice-title { display: block; margin-bottom: 2px; color: var(--text); font-size: 0.88rem; font-weight: 700; }
+  .choice-hint { margin: 0 0 10px; color: var(--text-dim); font-size: 0.76rem; }
+  .choice-divider { display: flex; align-items: center; gap: 10px; margin: 18px 0; color: var(--text-dim); font: 700 0.68rem ui-monospace, monospace; letter-spacing: 0.08em; }
+  .choice-divider::before, .choice-divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  details.sample-choice { border: 1px solid var(--line); border-radius: 8px; background: var(--paper); }
+  details.sample-choice > summary { cursor: pointer; list-style: none; padding: 12px 14px; color: var(--text); font-size: 0.84rem; font-weight: 700; }
+  details.sample-choice > summary::-webkit-details-marker { display: none; }
+  details.sample-choice > summary::before { content: "+"; display: inline-block; width: 20px; color: var(--accent); font-size: 1rem; }
+  details.sample-choice[open] > summary::before { content: "−"; }
+  details.sample-choice[open] > summary { border-bottom: 1px solid var(--line); }
+  .sample-choice-body { padding: 12px 14px 14px; }
+
+  .chips { display: flex; flex-direction: column; gap: 6px; margin: 0; }
+  .chip {
+    font: inherit; cursor: pointer; text-align: left; width: 100%; min-width: 0;
+    display: flex; align-items: center; gap: 8px;
+    background: var(--paper); border: 1px solid var(--line); border-radius: 6px;
+    padding: 8px 12px; font-size: 0.8rem; color: var(--text);
+    transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .chip .chip-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chip:hover { transform: translateX(2px); border-color: var(--cat-color, var(--accent)); }
+  .chip[aria-pressed="true"] {
+    background: var(--accent-wash); border-color: var(--cat-color, var(--accent));
+    box-shadow: 0 0 0 1px var(--cat-color, var(--accent)) inset; font-weight: 600;
+  }
+  .chip.oos { border-style: dashed; }
+  .chip.oos .cat-dot { background: transparent; border: 1.5px dashed var(--text-dim); }
+
+  .cat-dot { display: inline-block; vertical-align: middle; width: 9px; height: 9px; border-radius: 50%; background: var(--cat-color, var(--text-dim)); flex-shrink: 0; }
+
+  textarea {
+    font: inherit; width: 100%; min-height: 110px; padding: 10px 12px; border-radius: 6px;
+    border: 1px solid var(--line); background: var(--paper); color: var(--text); resize: vertical;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-wash); }
+  label { font-size: 0.8rem; color: var(--text-dim); }
+  .form-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 12px 0 4px; }
+  button.primary {
+    font: inherit; cursor: pointer; background: var(--accent); color: var(--paper);
+    border: none; border-radius: 6px; padding: 10px 20px; font-weight: 600;
+    transition: filter 0.1s ease, transform 0.1s ease, opacity 0.15s ease;
+  }
+  button.primary:hover:not(:disabled) { filter: brightness(1.1); }
+  button.primary:active:not(:disabled) { transform: translateY(1px); }
+  button.primary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  button.primary:disabled { opacity: 0.45; cursor: default; }
+  .char-count { font-size: 0.75rem; color: var(--text-dim); font-family: ui-monospace, monospace; }
+  .kbd-hint { margin: 8px 0 0; font-size: 0.72rem; color: var(--text-dim); }
+  .kbd-hint kbd { font-family: ui-monospace, monospace; background: var(--line); border-radius: 3px; padding: 1px 5px; }
+
+  .spinner {
+    width: 14px; height: 14px; margin-right: 8px; vertical-align: -2px; display: inline-block;
+    border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes fadein { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+  /* ── Verdict + ranking (always visible) ────────────────────────────────── */
+  .verdict {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px;
+    padding: 14px 16px; margin-bottom: 16px; border-radius: 8px;
+    background: var(--paper-2); border-left: 5px solid var(--cat-color, var(--accent));
+    animation: fadein 0.3s ease both;
+  }
+  .verdict-badge { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 1.05rem; }
+  .verdict-badge .cat-dot { width: 12px; height: 12px; }
+  .verdict-confidence { font-family: ui-monospace, monospace; font-size: 1.6rem; font-weight: 700; color: var(--text); line-height: 1; }
+  .verdict-confidence small { display: block; font-family: -apple-system, sans-serif; font-weight: 400; font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); margin-top: 3px; }
+  .verdict-meta { margin-left: auto; font-size: 0.76rem; color: var(--text-dim); }
+
+  .bars { margin: 14px 0; display: flex; flex-direction: column; gap: 10px; animation: fadein 0.35s ease both; }
+  .bar-row { display: grid; grid-template-columns: 170px 1fr auto; align-items: center; gap: 12px; }
+  @media (max-width: 640px) { .bar-row { grid-template-columns: 108px 1fr auto; } }
+  .bar-name { display: flex; align-items: center; gap: 7px; font-size: 0.8rem; min-width: 0; }
+  .bar-name .cat-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .predicted-check { flex-shrink: 0; }
+  .bar-track { height: 16px; background: var(--line); border-radius: 4px; overflow: hidden; }
+  .bar-fill { height: 100%; min-width: 3px; border-radius: 0 4px 4px 0; background: var(--bar-muted); transition: width 0.4s ease, background 0.2s ease; }
+  .bar-row.predicted .bar-fill { background: var(--cat-color); }
+  .bar-value { font-family: ui-monospace, monospace; font-variant-numeric: tabular-nums; font-size: 0.78rem; color: var(--text-dim); white-space: nowrap; }
+  .predicted-check { color: var(--accent); font-weight: 700; font-size: 0.7rem; margin-left: 2px; }
+  .bar-row.predicted .bar-track { box-shadow: 0 0 0 2px var(--cat-color); }
+
+  /* ── Progressive disclosure: how the model decided ─────────────────────── */
+  details.how { border: 1px solid var(--line); border-radius: 8px; padding: 2px 16px 14px; margin-top: 16px; background: var(--card); animation: fadein 0.4s ease both; }
+  details.how > summary { cursor: pointer; font-weight: 600; font-size: 0.88rem; color: var(--text); padding: 12px 0; list-style: none; }
+  details.how > summary::-webkit-details-marker { display: none; }
+  details.how > summary::before { content: "▸ "; color: var(--accent); }
+  details.how[open] > summary::before { content: "▾ "; }
+  details.how[open] > summary { border-bottom: 1px solid var(--line); margin-bottom: 6px; }
+  .step { border-left: 3px solid var(--accent); padding: 4px 0 4px 16px; margin: 16px 0; animation: fadein 0.3s ease both; }
+  .step .step-no { font-family: ui-monospace, monospace; font-size: 0.7rem; color: var(--accent); font-weight: 600; letter-spacing: 0.04em; }
+
+  .tbl-wrap { margin: 12px 0; overflow-x: auto; }
+  table { border-collapse: collapse; table-layout: auto; width: 100%; font-size: 0.82rem; }
+  th, td { text-align: left; padding: 8px 12px 8px 0; border-bottom: 1px solid var(--line); overflow-wrap: break-word; white-space: nowrap; }
+  tbody tr:hover { background: var(--accent-wash); }
+  td.num, th.num { font-family: ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+  th { font-family: ui-monospace, monospace; font-size: 0.66rem; letter-spacing: 0.03em; text-transform: uppercase; color: var(--text-dim); font-weight: 500; }
+
+  .json-actions { display: flex; justify-content: flex-end; margin-bottom: 6px; }
+  .copy-btn { font: inherit; font-size: 0.72rem; cursor: pointer; background: transparent; border: 1px solid var(--line); border-radius: 5px; padding: 3px 10px; color: var(--text-dim); transition: border-color 0.15s ease, color 0.15s ease; }
+  .copy-btn:hover { border-color: var(--accent); color: var(--accent); }
+  pre { background: var(--paper); border: 1px solid var(--line); border-radius: 6px; padding: 12px; overflow-x: auto; font-size: 0.78rem; }
+
+  /* ── Pipeline: connected vertical stepper ──────────────────────────────── */
+  .stepper { margin: 22px 0 8px; }
+  .stepper-node { position: relative; display: flex; gap: 16px; }
+  .stepper-node:not(:last-child) { padding-bottom: 26px; }
+  .stepper-node:not(:last-child)::after {
+    content: ""; position: absolute; left: 13px; top: 28px; bottom: 0; width: 2px; background: var(--line);
+  }
+  .stepper-dot {
+    position: relative; z-index: 1; flex-shrink: 0; width: 28px; height: 28px; border-radius: 50%;
+    background: var(--paper); border: 2px solid var(--accent); color: var(--accent);
+    display: flex; align-items: center; justify-content: center;
+    font-family: ui-monospace, monospace; font-weight: 700; font-size: 0.78rem;
+  }
+  .stepper-body { flex: 1; padding-bottom: 2px; }
+  .stepper-body h4 { margin: 2px 0 4px; font-size: 0.95rem; color: var(--text); }
+  .stepper-body p { margin: 0; font-size: 0.85rem; color: var(--text-dim); max-width: 62ch; }
+
+  /* ── Results: stat tiles + honest multi-label callout ─────────────────── */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin: 16px 0; }
+  .stat { background: var(--card); padding: 14px 16px; }
+  .stat-value { display: block; font-family: ui-monospace, monospace; font-variant-numeric: tabular-nums; font-size: 1.3rem; font-weight: 700; color: var(--text); }
+  .stat-label { display: block; font-size: 0.72rem; color: var(--text-dim); margin-top: 3px; }
+
+  .callout { border-left: 3px solid var(--accent); background: var(--card); border-radius: 0 6px 6px 0; padding: 14px 16px; margin: 18px 0; font-size: 0.87rem; }
+  .callout p { margin: 0; color: var(--text-dim); }
+  .callout b { color: var(--text); font-weight: 600; }
+
+  .stat-group-title { font-size: 0.78rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim); margin: 22px 0 8px; }
+  .stat.featured { background: var(--accent-wash); }
+  .stat.featured .stat-value { color: var(--accent); }
+  .fair-badge { display: block; margin-top: 3px; font-size: 0.66rem; font-weight: 700; color: var(--accent); text-transform: none; letter-spacing: 0; }
+  .stat.leak { background: var(--bad-wash); }
+  .stat.leak .stat-value { color: var(--bad); }
+  .callout.leak { border-left-color: var(--bad); }
+  .callout.leak b { color: var(--bad); }
+  tr.winner { background: var(--accent-wash); }
+  .winner-mark { color: var(--accent); font-weight: 700; white-space: nowrap; }
+  .results-status { padding: 18px; border: 1px dashed var(--line); border-radius: 8px; color: var(--text-dim); }
+  .label-chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 99px; padding: 3px 10px 3px 8px; font-size: 0.76rem; margin: 0 6px 6px 0; color: var(--text); }
+  .label-chip.chosen { border-color: var(--cat-color, var(--accent)); background: var(--accent-wash); font-weight: 600; }
+
+  table .cat-dot { margin-right: 7px; }
+
+  /* ── Infrastructure: parallel/independent pieces, not a sequence ──────── */
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; margin: 16px 0; }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 15px 17px;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  .card:hover { transform: translateY(-2px); box-shadow: var(--shadow-lift); }
+  .card h4 { margin: 0 0 6px; font-size: 0.92rem; color: var(--text); }
+  .card p { margin: 0; font-size: 0.83rem; color: var(--text-dim); }
+  .card .port-tag { display: inline-block; font-family: ui-monospace, monospace; font-size: 0.68rem; color: var(--accent); margin-top: 9px; }
+
+  footer { margin-top: 56px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--text-dim); font-size: 0.82rem; }
+</style>
+</head>
+<body>
+<main>
+  <div class="hero">
+    <div class="eyebrow">Demo interativa</div>
+    <h1>Medical Text Classifier</h1>
+    <p class="lede">Escreva qualquer texto em inglês e envie para a API classificar. Se preferir apenas explorar a demo, há exemplos prontos opcionais — não é necessário escolher um domínio antes de escrever.</p>
+
+    <div class="disclaimer">⚠ Demonstração técnica de apoio à categorização. Não realiza diagnóstico, não representa triagem hospitalar real e não substitui revisão humana ou validação clínica.</div>
+  </div>
+
+  <div id="health-banner"></div>
+
+  <section class="playground" aria-label="Classificação interativa">
+    <div class="panel panel-input">
+      <div class="panel-head"><span class="idx">1</span><h2>Envie um texto para classificar</h2></div>
+      <p class="panel-hint">Você pode escrever livremente ou carregar um exemplo pronto.</p>
+
+      <div class="input-choice primary-choice">
+        <label class="choice-title" for="text-input">Escreva o seu próprio texto</label>
+        <p class="choice-hint"><b>Caminho principal:</b> não selecione nenhum domínio. Digite o texto e a API escolherá a categoria.</p>
+        <textarea id="text-input" placeholder="Digite ou cole um abstract médico em inglês..."></textarea>
+        <div class="form-row">
+          <button class="primary" id="go" disabled>Classificar meu texto →</button>
+          <span class="char-count" id="char-count"></span>
+        </div>
+        <p class="kbd-hint"><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Enter</kbd> para classificar</p>
+      </div>
+
+      <div class="choice-divider" aria-hidden="true">OU</div>
+
+      <details class="sample-choice">
+        <summary id="examples-title">Quero testar com um exemplo pronto</summary>
+        <div class="sample-choice-body" aria-labelledby="examples-title">
+          <p class="choice-hint">Opcional: estes botões apenas carregam textos de demonstração. Eles não são necessários para classificar o seu texto.</p>
+          <div class="chips" id="sample-chips">
+            <span class="lede" style="font-size:0.8rem;">Carregando exemplos…</span>
+          </div>
+        </div>
+      </details>
+    </div>
+
+    <div class="panel panel-output">
+      <div class="panel-head"><span class="idx">2</span><h2>O que o modelo respondeu</h2></div>
+      <div id="result" aria-live="polite">
+        <p class="lede">Escreva um texto ou use um exemplo pronto para ver a classificação.</p>
+      </div>
+    </div>
+  </section>
+
+  <h2 class="section-title">Como isso foi treinado (rodou uma vez, offline)</h2>
+  <p class="lede">Estas 6 etapas são os targets do <code>Makefile</code> — cada uma só
+  reexecuta quando você a chama de novo (<code>make train</code>, <code>make evaluate</code>...).
+  Nenhuma delas roda quando você pede uma classificação acima.</p>
+  <div class="stepper">
+    <div class="stepper-node">
+      <div class="stepper-dot">1</div>
+      <div class="stepper-body">
+        <h4>dataset</h4>
+        <p>Agrega labels por abstract separadamente em treino/teste, remove do treino
+        os 988 textos presentes no teste e só então separa 10% para validação. O teste
+        nunca participa do fit.</p>
+      </div>
+    </div>
+    <div class="stepper-node">
+      <div class="stepper-dot">2</div>
+      <div class="stepper-body">
+        <h4>preprocessing</h4>
+        <p>Strategy chain: normalização Unicode, remoção de pontuação, lematização
+        (spaCy <code>en_core_web_sm</code>) e remoção de stopwords (NLTK) —
+        <code>src/features/text_preprocessing.py</code>.</p>
+      </div>
+    </div>
+    <div class="stepper-node">
+      <div class="stepper-dot">3</div>
+      <div class="stepper-body">
+        <h4>features</h4>
+        <p>TF-IDF (5.000 termos, unigramas+bigramas, min_df=2) por padrão, ou embeddings
+        biomédicos scispaCy <code>en_core_sci_md</code> — selecionável no
+        <code>config.yaml</code>.</p>
+      </div>
+    </div>
+    <div class="stepper-node">
+      <div class="stepper-dot">4</div>
+      <div class="stepper-body">
+        <h4>train</h4>
+        <p>One-vs-Rest treina uma decisão binária por categoria sobre a Strategy
+        configurada; o padrão é Regressão Logística balanceada. A busca usa F1-macro
+        multilabel em CV 3-fold quando <code>tuning.enabled</code>.</p>
+      </div>
+    </div>
+    <div class="stepper-node">
+      <div class="stepper-dot">5</div>
+      <div class="stepper-body">
+        <h4>evaluate</h4>
+        <p>Métricas multilabel de verdade — Hamming loss, Jaccard por amostra,
+        F1 macro/micro/weighted e recall médio das classes minoritárias — em
+        validação e teste, registradas no MLflow junto do run de treino.</p>
+      </div>
+    </div>
+    <div class="stepper-node">
+      <div class="stepper-dot">6</div>
+      <div class="stepper-body">
+        <h4>export-onnx + promote</h4>
+        <p>Classificador convertido para ONNX Runtime (~18% menos latência).
+        <code>make promote</code> só considera runs acima de um piso de
+        qualidade; entre os empatados dentro da margem de ruído estatístico,
+        promove o de menor latência ONNX — nunca troca acurácia real por
+        velocidade. Ver "Comparação final dos modelos" abaixo.</p>
+      </div>
+    </div>
+  </div>
+
+  <h2 class="section-title">Comparação final dos modelos</h2>
+  <p class="lede">Esta seção lê os resultados persistidos em
+  <code>metrics/experiment_comparison.json</code> e o registro em
+  <code>models/promoted_model.json</code>; os números não foram copiados manualmente.</p>
+  <div id="experiment-results" aria-live="polite">
+    <p class="results-status"><span class="spinner"></span>Carregando resultados dos experimentos…</p>
+  </div>
+
+  <h2 class="section-title">Decisão de dados: multilabel sem vazamento</h2>
+  <p class="lede">O corpus original guarda uma linha por par
+  <code>(abstract, condição)</code>. A preparação atual agrega os labels dentro de cada
+  split, sem transferir informação entre treino e teste.</p>
+  <div class="stats">
+    <div class="stat"><span class="stat-value">988</span><span class="stat-label">abstracts encontrados nos dois splits</span></div>
+    <div class="stat leak"><span class="stat-value">1.097</span><span class="stat-label">linhas removidas somente do treino</span></div>
+    <div class="stat"><span class="stat-value">8.457</span><span class="stat-label">abstracts em treino + validação</span></div>
+    <div class="stat featured"><span class="stat-value">0</span><span class="stat-label">textos compartilhados após a limpeza</span></div>
+  </div>
+  <div class="callout">
+    <p><b>Por que essa política é segura:</b> treino e teste são processados
+    separadamente. Se um texto aparece no teste, todas as suas ocorrências são
+    descartadas do treino, mesmo que tragam labels A/B/C; o teste mantém somente seus
+    próprios labels, como D. Nenhum label do teste é usado para ensinar, ajustar threshold
+    ou selecionar hiperparâmetros. É preferível não ensinar aquele abstract a ensinar um
+    target contraditório e depois cobrar outro.</p>
+  </div>
+  <p class="lede">O modelo é realmente multilabel: cinco classificadores binários
+  One-vs-Rest podem selecionar várias categorias simultaneamente. Os scores são
+  independentes e não precisam somar 100%.</p>
+
+  <h2 class="section-title">Infraestrutura ao redor do modelo</h2>
+  <p class="lede">Cinco peças independentes, não uma sequência — cada uma resolve uma
+  preocupação operacional diferente em volta do mesmo classificador.</p>
+  <div class="grid">
+    <div class="card">
+      <h4>🐳 Docker</h4>
+      <p>Imagem multi-stage (builder/api/train); <code>docker compose up</code> sobe
+      api + mlflow + prometheus + grafana com um comando.</p>
+      <span class="port-tag">make compose-up</span>
+    </div>
+    <div class="card">
+      <h4>📊 MLflow</h4>
+      <p>Cada <code>make train</code> registra hiperparâmetros, métricas e o pipeline
+      treinado. <code>make promote</code>: piso de qualidade em
+      <code>cv_macro_f1_mean</code>, empate estatístico decidido por menor
+      latência ONNX — nunca acurácia real por velocidade.</p>
+      <span class="port-tag">:5000</span>
+    </div>
+    <div class="card">
+      <h4>📡 Prometheus</h4>
+      <p>Coleta <code>http_requests_total</code>, <code>http_request_duration_seconds</code>
+      (p50/p95) e <code>triage_predictions_total</code> do <code>/metrics</code> a cada 5s.</p>
+      <span class="port-tag">:9090</span>
+    </div>
+    <div class="card">
+      <h4>📈 Grafana</h4>
+      <p>Dashboard provisionado: volume e taxa de erro, latência p50/p95 e distribuição
+      das 5 categorias médicas nas predições recentes.</p>
+      <span class="port-tag">:3000 · admin/admin</span>
+    </div>
+    <div class="card">
+      <h4>⚡ ONNX Runtime</h4>
+      <p>Só o classificador é convertido — preprocessing e TF-IDF ficam no prefixo
+      sklearn. Paridade numérica testada com <code>rtol=1e-5</code>.</p>
+      <span class="port-tag" id="onnx-speedup-tag">latência medida em make benchmark-latency</span>
+    </div>
+  </div>
+
+  <footer>
+    Arquitetura completa em <code>docs/architecture.md</code>, limitações do modelo em
+    <code>docs/model_card.md</code> (no repositório). Endpoints usados aqui:
+    <code>GET /explain</code> e <code>GET /demo/sample-texts</code> — não fazem parte
+    da API de produto, só desta demo.
+  </footer>
+</main>
+
+<script>
+const $ = (sel) => document.querySelector(sel);
+const OOS_TEXT = "The quarterly financial report showed strong revenue growth and reduced operating costs.";
+const MOBILE_BREAKPOINT = 860;
+
+// Fixed hue per canonical class (identity), independent of score/rank — never recolor by rank.
+const CATEGORY_COLOR = {
+  "neoplasms": "var(--cat-1)",
+  "digestive system diseases": "var(--cat-2)",
+  "nervous system diseases": "var(--cat-3)",
+  "cardiovascular diseases": "var(--cat-4)",
+  "general pathological conditions": "var(--cat-5)",
+};
+
+function fmtNum(n, digits) {
+  if (n === null || n === undefined) return "—";
+  return Number(n).toLocaleString("pt-BR", { maximumFractionDigits: digits ?? 3 });
+}
+
+function fmtPct(value) {
+  return value === null || value === undefined ? "—" : `${fmtNum(value * 100, 2)}%`;
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>'"]/g, (char) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",
+  })[char]);
+}
+
+async function loadExperimentResults() {
+  const container = $("#experiment-results");
+  try {
+    const response = await fetch("/demo/experiment-results");
+    if (!response.ok) throw new Error("resultados ainda não foram gerados");
+    const data = await response.json();
+    const rows = [...data.candidates]
+      .sort((a, b) => (b.cv_macro_f1_mean ?? -Infinity) - (a.cv_macro_f1_mean ?? -Infinity))
+      .map((candidate) => {
+        const winner = candidate.key === data.winner_key;
+        const sklearnMs = candidate.latency_sklearn_p99_ms;
+        const onnxMs = candidate.latency_onnx_p99_ms;
+        return `<tr class="${winner ? "winner" : ""}">
+          <td>${escapeHtml(candidate.label)} ${winner ? '<span class="winner-mark">★ vencedor</span>' : ""}</td>
+          <td class="num">${fmtPct(candidate.cv_macro_f1_mean)}</td>
+          <td class="num">${fmtPct(candidate.cv_macro_f1_std)}</td>
+          <td class="num">${fmtPct(candidate.test_macro_f1)}</td>
+          <td class="num">${fmtPct(candidate.ml_accuracy)}</td>
+          <td class="num">${fmtPct(candidate.test_accuracy)}</td>
+          <td class="num">${fmtPct(candidate.minority_recall)}</td>
+          <td class="num">${sklearnMs == null ? "—" : `${fmtNum(sklearnMs, 2)}ms`}</td>
+          <td class="num">${onnxMs == null ? "—" : `${fmtNum(onnxMs, 2)}ms`}</td>
+        </tr>`;
+      }).join("");
+    const winner = data.candidates.find((candidate) => candidate.key === data.winner_key);
+    const promoted = data.promoted;
+    const promotionText = promoted
+      ? `O MLflow registrou <code>${escapeHtml(promoted.model_name)}</code> v${escapeHtml(promoted.version)} em <b>${escapeHtml(promoted.stage)}</b>, com ${escapeHtml(promoted.metric)} = ${fmtPct(promoted.value)}.`
+      : "O arquivo da promoção ainda não foi gerado; execute <code>make promote</code>.";
+    const criteriaStats = data.selection.min_metric == null ? "" : `<div class="stats">
+      <div class="stat featured"><span class="stat-value">${fmtPct(data.selection.min_metric)}</span><span class="stat-label">piso mínimo · ${escapeHtml(data.selection.primary_metric)}</span></div>
+      <div class="stat"><span class="stat-value">±${fmtPct(data.selection.accuracy_tolerance)}</span><span class="stat-label">faixa de empate estatístico</span></div>
+      <div class="stat"><span class="stat-value">${data.selection.latency_used ? "média ONNX" : "não configurado"}</span><span class="stat-label">desempate dentro da faixa</span></div>
+    </div>`;
+    container.innerHTML = `${criteriaStats}<div class="tbl-wrap"><table>
+      <thead><tr><th>modelo</th><th class="num">CV F1-macro ↑</th><th class="num">desvio CV ↓</th><th class="num">F1 teste ★</th><th class="num">accuracy Jaccard ★</th><th class="num">accuracy exata</th><th class="num">recall minorias</th><th class="num">sklearn p99</th><th class="num">ONNX p99 ↓</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>
+      <div class="callout"><p><b>Por que ${escapeHtml(winner.label)} venceu nesta tabela:</b>
+      teve o maior <code>${escapeHtml(data.selection.primary_metric)}</code> (${fmtPct(winner.cv_macro_f1_mean)}).
+      Em caso de empate, vence o menor <code>${escapeHtml(data.selection.tiebreak_metric)}</code>, isto é, o modelo mais estável entre os folds.
+      As métricas do teste são exibidas para avaliação final, mas não escolhem o vencedor, preservando o teste oficial.
+      <b>★ métricas justas</b> — F1 teste (F1-macro multirrótulo) e accuracy Jaccard (sobreposição
+      média entre rótulos previstos e verdadeiros por abstract) tratam corretamente abstracts com
+      mais de um rótulo válido; priorize-as. <b>accuracy exata</b> exige acerto simultâneo de
+      todos os rótulos do abstract e tende a subestimar o desempenho real — ver
+      <code>docs/model_card.md#avaliação</code>.</p></div>
+      <div class="callout"><p><b>O que <code>make promote</code> faz de verdade (contra todo o
+      histórico do MLflow, não só estes 3 candidatos):</b>
+      ${data.selection.min_metric != null
+        ? `um run só é elegível com <code>${escapeHtml(data.selection.primary_metric)}</code>
+           &gt;= <b>${fmtPct(data.selection.min_metric)}</b> — abaixo disso a promoção falha
+           alto em vez de subir um modelo ruim. Um piso de negócio, não estatístico: erro de
+           triagem custa retrabalho de revisão humana e confiança na ferramenta, o que pesa
+           mais que qualquer economia de infraestrutura.`
+        : "nenhum piso de qualidade configurado — qualquer run com artefato é elegível."}
+      ${data.selection.latency_used
+        ? ` Entre os runs que passam nesse piso, quem estiver a até
+           <b>${fmtPct(data.selection.accuracy_tolerance)}</b> do melhor
+           <code>${escapeHtml(data.selection.primary_metric)}</code> é tratado como empate
+           estatístico (mesmo limiar de ruído citado acima, não é outro número inventado) — e
+           dentro desse empate, vence o de menor
+           <code>${escapeHtml(data.selection.latency_metric)}</code> (backend real de
+           produção). Latência só desempata ruído por ruído: uma diferença real de acurácia
+           sempre vence, e não existe teto máximo de latência — poucos ms a mais nunca
+           justificam abrir mão de um modelo genuinamente melhor.`
+        : " Latência ainda não participa da promoção (registry.latency_metric não configurado)."}
+      ${promotionText}</p></div>`;
+  } catch (error) {
+    container.innerHTML = `<p class="results-status">Não foi possível carregar a comparação: ${escapeHtml(error.message)}. Execute <code>make experiments</code> e recarregue a página.</p>`;
+  }
+}
+
+async function loadLatencyComparison() {
+  const tag = $("#onnx-speedup-tag");
+  try {
+    const response = await fetch("/demo/latency-comparison");
+    if (!response.ok) throw new Error("benchmark ainda não foi gerado");
+    const data = await response.json();
+    const speedupPct = (1 - 1 / data.speedup_x) * 100;
+    const sign = speedupPct >= 0 ? "−" : "+";
+    tag.textContent = `${sign}${fmtNum(Math.abs(speedupPct), 1)}% latência (medido)`;
+  } catch (error) {
+    tag.textContent = "latência medida em make benchmark-latency";
+  }
+}
+
+async function checkHealth() {
+  try {
+    const r = await fetch("/health");
+    const body = await r.json();
+    if (body.status === "ok") return true;
+    $("#health-banner").innerHTML = `<div class="banner err">
+      A API está em modo <b>degradado</b> (nenhum modelo carregado). Rode
+      <code>make dataset</code>, <code>make train</code> e reinicie
+      <code>make api</code>.</div>`;
+    return false;
+  } catch (e) {
+    $("#health-banner").innerHTML = `<div class="banner err">
+      Não consegui falar com <code>/health</code>. A API está no ar?</div>`;
+    return false;
+  }
+}
+
+function chipButton(label, text, isOos) {
+  const color = isOos ? null : CATEGORY_COLOR[label];
+  const style = color ? ` style="--cat-color:${color}"` : "";
+  return `<button type="button" class="chip${isOos ? " oos" : ""}"${style}
+    aria-pressed="false" data-text="${encodeURIComponent(text)}" title="${label}">
+    <span class="cat-dot"></span><span class="chip-label">${label}</span>
+  </button>`;
+}
+
+function setActiveChip(selected) {
+  document.querySelectorAll(".chip").forEach((c) => {
+    c.setAttribute("aria-pressed", c === selected ? "true" : "false");
+  });
+}
+
+async function loadSampleTexts() {
+  try {
+    const r = await fetch("/demo/sample-texts");
+    if (!r.ok) throw new Error("sample-texts indisponível");
+    const samples = await r.json();
+    const chipsHtml = samples.map((s) => chipButton(s.label, s.text, false)).join("")
+      + chipButton("fora do domínio", OOS_TEXT, true);
+    $("#sample-chips").innerHTML = chipsHtml;
+    document.querySelectorAll(".chip").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        // Only fills the textarea — same as typing your own text. The
+        // request only fires on the explicit "Classificar meu texto" click,
+        // so every /explain call is a request the user asked for at that
+        // moment, not an auto-submit hidden inside picking an example.
+        setActiveChip(btn);
+        $("#text-input").value = decodeURIComponent(btn.dataset.text);
+        updateCharCount();
+        $("#text-input").focus();
+      });
+    });
+    return true;
+  } catch (e) {
+    $("#sample-chips").innerHTML = `<p class="lede" style="font-size:0.8rem;">Não consegui
+      carregar exemplos — a API está no ar e com um modelo carregado?</p>`;
+    return false;
+  }
+}
+
+function updateCharCount() {
+  const length = $("#text-input").value.length;
+  $("#char-count").textContent = `${length} caracteres`;
+  $("#go").disabled = length === 0;
+}
+
+function termsTable(topTerms) {
+  if (!topTerms) {
+    return `<p>Atribuição por termo indisponível para o backend/modelo atual
+      (só linear + TF-IDF expõe <code>coef_</code>; ex.: ONNX ou modelos de árvore).
+      As pontuações acima continuam sendo o resultado real do modelo.</p>`;
+  }
+  if (!topTerms.length) {
+    return `<p>Nenhum termo do vocabulário TF-IDF apareceu neste texto.</p>`;
+  }
+  const rows = topTerms.map((t) => `<tr>
+    <td>${t.term}</td>
+    <td class="num">${fmtNum(t.tfidf, 4)}</td>
+    <td class="num">${fmtNum(t.weight, 4)}</td>
+    <td class="num">${fmtNum(t.contribution, 4)}</td>
+  </tr>`).join("");
+  return `<div class="tbl-wrap"><table><thead><tr>
+    <th>termo</th><th class="num">tf-idf</th><th class="num">peso do modelo</th>
+    <th class="num">contribuição</th>
+  </tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
+function rankingBars(scores, labels) {
+  const entries = Object.entries(scores).sort((a, b) => b[1] - a[1]);
+  const maxScore = Math.max(...entries.map(([, v]) => v), 1e-9);
+  return `<div class="bars">` + entries.map(([category, score]) => {
+    const pct = Math.max((score / maxScore) * 100, 2);
+    const isPredicted = labels.includes(category);
+    const color = CATEGORY_COLOR[category] || "var(--text-dim)";
+    const check = isPredicted ? `<span class="predicted-check">✓ previsto</span>` : "";
+    return `<div class="bar-row${isPredicted ? " predicted" : ""}" style="--cat-color:${color}">
+      <div class="bar-name"><span class="cat-dot"></span><b class="cat-name" title="${category}">${category}</b>${check}</div>
+      <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>
+      <div class="bar-value">${fmtNum(score, 4)}</div>
+    </div>`;
+  }).join("") + `</div>`;
+}
+
+function verdictHeader(data) {
+  const color = CATEGORY_COLOR[data.label] || "var(--text-dim)";
+  const confidence = fmtNum((data.scores[data.label] || 0) * 100, 1);
+  const selected = data.labels.map((label) => `<span class="label-chip chosen"
+    style="--cat-color:${CATEGORY_COLOR[label] || "var(--accent)"}"><span class="cat-dot"></span>${escapeHtml(label)}</span>`).join("");
+  return `<div class="verdict" style="--cat-color:${color}">
+    <div class="verdict-badge">${selected}</div>
+    <div class="verdict-confidence">${confidence}%<small>maior score</small></div>
+    <div class="verdict-meta">backend <code>${data.backend}</code></div>
+  </div>`;
+}
+
+function renderExplain(data, rawText) {
+  let html = verdictHeader(data);
+  html += rankingBars(data.scores, data.labels);
+
+  html += `<details class="how">
+    <summary>Como o modelo chegou nessa resposta</summary>
+    <div class="step"><div class="step-no">PRÉ-PROCESSAMENTO REAL</div>
+      <p>Depois de normalização Unicode, remoção de pontuação, lematização e
+      remoção de stopwords (a mesma cadeia de Strategies usada no treino):</p>
+      <pre>${data.preprocessed_text}</pre>
+    </div>
+    <div class="step"><div class="step-no">TERMOS QUE MAIS PESARAM</div>
+      <p>TF-IDF do termo × peso aprendido pelo classificador para
+      <b>${data.label}</b>, ordenado por contribuição (maior primeiro).</p>
+      ${termsTable(data.top_terms)}
+    </div>
+    <details class="raw-json">
+      <summary>ver JSON bruto de /explain</summary>
+      <div class="json-actions"><button type="button" class="copy-btn" id="copy-json-btn">copiar JSON</button></div>
+      <pre>${JSON.stringify(data, null, 2)}</pre>
+    </details>
+  </details>`;
+
+  $("#result").innerHTML = html;
+
+  const copyBtn = $("#copy-json-btn");
+  copyBtn?.addEventListener("click", () => {
+    navigator.clipboard.writeText(JSON.stringify(data, null, 2)).then(() => {
+      copyBtn.textContent = "copiado ✓";
+      setTimeout(() => { copyBtn.textContent = "copiar JSON"; }, 1500);
+    }).catch(() => {});
+  });
+
+  if (window.innerWidth < MOBILE_BREAKPOINT) {
+    $("#result").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+}
+
+// Bumped on every runExplain() call; a response only renders if it's still
+// the latest one requested — guards against an earlier click's slower
+// response landing after a later click's and clobbering its result.
+let explainRequestSeq = 0;
+
+async function runExplain() {
+  const text = $("#text-input").value.trim();
+  if (!text) return;
+  const seq = ++explainRequestSeq;
+  const btn = $("#go");
+  btn.disabled = true;
+  $("#result").innerHTML = `<p class="lede"><span class="spinner"></span>Consultando o modelo…</p>`;
+  try {
+    const r = await fetch(`/explain?text=${encodeURIComponent(text)}`);
+    if (seq !== explainRequestSeq) return; // a newer request has since been fired
+    if (!r.ok) {
+      const body = await r.json().catch(() => ({}));
+      throw new Error(body.detail || `HTTP ${r.status}`);
+    }
+    renderExplain(await r.json(), text);
+  } catch (e) {
+    if (seq !== explainRequestSeq) return;
+    $("#result").innerHTML = `<div class="banner err">Erro ao consultar o modelo: ${e.message}</div>`;
+  } finally {
+    if (seq === explainRequestSeq) updateCharCount();
+  }
+}
+
+async function init() {
+  loadExperimentResults();
+  loadLatencyComparison();
+  const healthy = await checkHealth();
+  await loadSampleTexts();
+  updateCharCount();
+  if (!healthy) {
+    $("#result").innerHTML = `<p class="lede">A classificação ficará disponível quando a API carregar o modelo.</p>`;
+  }
+}
+
+$("#go").addEventListener("click", runExplain);
+$("#text-input").addEventListener("input", () => {
+  setActiveChip(null);
+  updateCharCount();
+});
+$("#text-input").addEventListener("keydown", (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && !$("#go").disabled) {
+    e.preventDefault();
+    runExplain();
+  }
+});
+init();
+</script>
+</body>
+</html>

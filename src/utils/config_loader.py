@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, Field, field_validator
@@ -70,12 +70,20 @@ class PreprocessingConfig(BaseModel):
     preserve_numbers: bool
 
 
-class FeatureConfig(BaseModel):
-    """TF-IDF feature parameters."""
+class EmbeddingsConfig(BaseModel):
+    """Pretrained spaCy model used for averaged word-vector features."""
 
+    spacy_model: str
+
+
+class FeatureConfig(BaseModel):
+    """Feature Strategy selection: TF-IDF parameters or word embeddings."""
+
+    type: Literal["tfidf", "embeddings"]
     max_features: int = Field(gt=0)
     ngram_range: tuple[int, int]
     min_df: int = Field(gt=0)
+    embeddings: EmbeddingsConfig
 
 
 class LogisticRegressionConfig(BaseModel):
@@ -108,13 +116,39 @@ class GradientBoostingConfig(BaseModel):
     random_state: int
 
 
+class LinearSvmConfig(BaseModel):
+    """Calibrated Linear SVM parameters."""
+
+    C: float = Field(gt=0)
+    max_iter: int = Field(gt=0)
+    class_weight: str | None
+    random_state: int
+    calibration_cv: int = Field(gt=1)
+
+
+class ComplementNbConfig(BaseModel):
+    """Complement Naive Bayes parameters."""
+
+    alpha: float = Field(gt=0)
+    norm: bool
+
+
 class ModelConfig(BaseModel):
     """Active model Strategy and parameters for every supported option."""
 
-    type: Literal["logistic_regression", "random_forest", "gradient_boosting"]
+    type: Literal[
+        "logistic_regression",
+        "random_forest",
+        "gradient_boosting",
+        "linear_svm",
+        "complement_nb",
+    ]
+    prediction_threshold: float = Field(gt=0, lt=1)
     logistic_regression: LogisticRegressionConfig
     random_forest: RandomForestConfig
     gradient_boosting: GradientBoostingConfig
+    linear_svm: LinearSvmConfig
+    complement_nb: ComplementNbConfig
 
 
 class ArtifactConfig(BaseModel):
@@ -132,6 +166,29 @@ class ArtifactConfig(BaseModel):
     metrics_file: str
 
 
+class RegistryConfig(BaseModel):
+    """Selection criteria for promoting a run in the MLflow Model Registry."""
+
+    model_name: str
+    metric: str
+    ascending: bool
+    stage: str
+    tiebreak_metric: str | None = None
+    tiebreak_ascending: bool = True
+    latency_metric: str | None = None
+    accuracy_tolerance: float = Field(default=0.0, ge=0)
+    min_metric: float | None = None
+
+
+class TuningConfig(BaseModel):
+    """Hyperparameter search settings: CV scheme and per-Strategy grids."""
+
+    enabled: bool
+    cv_folds: int = Field(gt=1)
+    scoring: str
+    grid: dict[str, dict[str, list[Any]]]
+
+
 class ExperimentConfig(BaseModel):
     """Typed root configuration for the complete ML system."""
 
@@ -142,6 +199,8 @@ class ExperimentConfig(BaseModel):
     features: FeatureConfig
     model: ModelConfig
     artifacts: ArtifactConfig
+    registry: RegistryConfig
+    tuning: TuningConfig
 
 
 @lru_cache(maxsize=8)

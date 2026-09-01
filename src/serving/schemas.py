@@ -38,9 +38,10 @@ class TriageRequest(BaseModel):
 
 
 class TriageResponse(BaseModel):
-    """Predicted class, canonical probabilities and inference backend."""
+    """Primary label, all selected labels, independent scores and backend."""
 
     label: MedicalCondition
+    labels: list[MedicalCondition]
     scores: dict[MedicalCondition, float]
     backend: str
 
@@ -49,9 +50,38 @@ class TriageResponse(BaseModel):
         """Require every canonical class and normalized probabilities."""
         if set(self.scores) != set(MedicalCondition):
             raise ValueError("scores must contain every canonical class")
-        if abs(sum(self.scores.values()) - 1.0) > 1e-5:
-            raise ValueError("scores must sum to 1")
+        if any(score < 0 or score > 1 for score in self.scores.values()):
+            raise ValueError("scores must be probabilities between 0 and 1")
+        if self.label not in self.labels:
+            raise ValueError("primary label must be included in labels")
         return self
+
+
+class ExplainTerm(BaseModel):
+    """One TF-IDF term's contribution to the predicted class score."""
+
+    term: str
+    tfidf: float
+    weight: float
+    contribution: float
+
+
+class ExplainResponse(BaseModel):
+    """Demo-only breakdown of one classification: preprocessing and terms."""
+
+    label: MedicalCondition
+    labels: list[MedicalCondition]
+    scores: dict[MedicalCondition, float]
+    backend: str
+    preprocessed_text: str
+    top_terms: list[ExplainTerm] | None = None
+
+
+class SampleText(BaseModel):
+    """One real example abstract used to seed the interactive demo."""
+
+    label: MedicalCondition
+    text: str
 
 
 class HealthResponse(BaseModel):

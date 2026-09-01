@@ -39,23 +39,29 @@ preprocessing:
   preserve_numbers: true
 
 features:
+  type: tfidf  # tfidf | embeddings
   max_features: 5000
   ngram_range: [1, 2]
   min_df: 2
+  embeddings:
+    # scispaCy — vetores treinados em texto biomedico, capturam similaridade
+    # semantica (ex.: "carcinoma" ~ "tumor") que o TF-IDF nao ve.
+    spacy_model: en_core_sci_md
 
 model:
   type: logistic_regression
+  prediction_threshold: 0.5
   logistic_regression:
-    C: 1.0
+    C: 0.3  # vencedor da busca CV (docs/model_card.md)
     max_iter: 1000
     class_weight: balanced
-    n_jobs: -1
+    n_jobs: 1  # evita explosao de processos/memoria em Windows e CI
     random_state: 42
   random_forest:
     n_estimators: 160
     max_depth: null
     class_weight: balanced
-    n_jobs: -1
+    n_jobs: 1
     random_state: 42
   gradient_boosting:
     n_estimators: 80
@@ -63,9 +69,18 @@ model:
     max_depth: 3
     selection_k: 800
     random_state: 42
+  linear_svm:
+    C: 1.0
+    max_iter: 5000
+    class_weight: balanced
+    random_state: 42
+    calibration_cv: 3
+  complement_nb:
+    alpha: 1.0
+    norm: false
 
 artifacts:
-  schema_version: 2
+  schema_version: 3
   model_path: models/artifacts
   pipeline_file: triage_pipeline.joblib
   metadata_file: model_metadata.json
@@ -75,3 +90,45 @@ artifacts:
   classes_file: classes.json
   metrics_path: metrics
   metrics_file: eval_metrics.json
+
+registry:
+  model_name: medical_text_classifier
+  # cv_macro_f1_mean (3-fold sobre treino+validacao) em vez de uma metrica de
+  # split unico: com 1.155 linhas de validacao, diferencas < 0.015 sao ruido
+  # (ver docs/plano_melhoria_f1.md, secao 3.6). Desempate por menor desvio
+  # entre folds (modelo mais estavel).
+  metric: cv_macro_f1_mean
+  ascending: false
+  tiebreak_metric: cv_macro_f1_std
+  tiebreak_ascending: true
+  # Piso de negocio: nenhum run abaixo disso e candidato a promocao, mesmo
+  # que seja o unico disponivel ou o mais rapido — falha alto em vez de
+  # promover um modelo ruim. 0.75 ja exclui Gradient Boosting (0.629,
+  # documentado como nao competitivo neste corpus) e fica perto da producao
+  # atual (0.7768). Ver docs/model_card.md secao "Piso de qualidade e
+  # desempate por latencia" para a justificativa completa.
+  min_metric: 0.75
+  # Entre runs que passam no piso, ate essa distancia do melhor
+  # cv_macro_f1_mean (mesmo limiar de ruido citado acima) e tratado como
+  # empate estatistico — decidido por latencia_metric abaixo em vez do
+  # primeiro por ordem de tiebreak.
+  accuracy_tolerance: 0.015
+  # So desempata empates estatisticos (nunca troca acuracia real por
+  # velocidade): entre os empatados, vence o de menor latencia no backend
+  # real de producao (ONNX). Sem teto maximo de latencia de proposito.
+  latency_metric: latency_onnx_mean_ms
+  stage: Production
+
+tuning:
+  enabled: true
+  cv_folds: 3
+  scoring: f1_macro
+  grid:
+    # tfidf fora da grade: o plano ja mediu que max_features=5000/ngram=1-2
+    # (config atual) e o melhor ponto (variacao de so 0.027 no espaco todo).
+    # linear_svm e complement_nb saíram da grade: nao fazem mais parte dos 4
+    # experimentos oficiais (docs/metodologia_experimentos.md); resultados
+    # tunados de ambos continuam registrados em docs/model_card.md.
+    logistic_regression:
+      C: [0.1, 0.3, 1.0]
+      class_weight: [balanced]
