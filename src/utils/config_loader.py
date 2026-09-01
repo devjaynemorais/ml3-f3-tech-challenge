@@ -175,6 +175,9 @@ class RegistryConfig(BaseModel):
     stage: str
     tiebreak_metric: str | None = None
     tiebreak_ascending: bool = True
+    latency_metric: str | None = None
+    accuracy_tolerance: float = Field(default=0.0, ge=0)
+    min_metric: float | None = None
 
 
 class TuningConfig(BaseModel):

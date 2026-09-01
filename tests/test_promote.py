@@ -31,10 +31,12 @@ def tracking(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path
 
 
-def _log_run(metric_value: float) -> str:
+def _log_run(metric_value: float, latency_ms: float | None = None) -> str:
     """Create one run with a validation metric and a logged sklearn model."""
     with mlflow.start_run() as run:
         mlflow.log_metric("validation_macro_f1", metric_value)
+        if latency_ms is not None:
+            mlflow.log_metric("latency_onnx_mean_ms", latency_ms)
         model = LogisticRegression().fit([[0], [1]], [0, 1])
         mlflow.sklearn.log_model(model, artifact_path="model")
         return run.info.run_id
@@ -57,6 +59,82 @@ def test_find_best_model_run_picks_highest_metric(tracking: Path) -> None:
     run = mlflow_tracking.find_best_model_run("test_exp", "validation_macro_f1", False)
 
     assert run.info.run_id == best
+
+
+def test_find_best_model_run_prefers_fastest_within_tolerance(tracking: Path) -> None:
+    slower_best = _log_run(0.90, latency_ms=8.0)
+    faster_tied = _log_run(0.89, latency_ms=3.0)  # within 0.015 of 0.90
+    _log_run(0.60, latency_ms=1.0)  # fast but well outside the tolerance band
+
+    run = mlflow_tracking.find_best_model_run(
+        "test_exp",
+        "validation_macro_f1",
+        False,
+        latency_metric="latency_onnx_mean_ms",
+        accuracy_tolerance=0.015,
+    )
+
+    assert run.info.run_id == faster_tied
+    assert run.info.run_id != slower_best
+
+
+def test_find_best_model_run_never_trades_real_accuracy_for_latency(
+    tracking: Path,
+) -> None:
+    better_but_slower = _log_run(0.90, latency_ms=9.0)
+    _log_run(0.70, latency_ms=1.0)  # much faster, but a real accuracy gap
+
+    run = mlflow_tracking.find_best_model_run(
+        "test_exp",
+        "validation_macro_f1",
+        False,
+        latency_metric="latency_onnx_mean_ms",
+        accuracy_tolerance=0.015,
+    )
+
+    assert run.info.run_id == better_but_slower
+
+
+def test_find_best_model_run_falls_back_when_latency_never_benchmarked(
+    tracking: Path,
+) -> None:
+    best = _log_run(0.90)  # no latency logged for any candidate
+    _log_run(0.60)
+
+    run = mlflow_tracking.find_best_model_run(
+        "test_exp",
+        "validation_macro_f1",
+        False,
+        latency_metric="latency_onnx_mean_ms",
+        accuracy_tolerance=0.015,
+    )
+
+    assert run.info.run_id == best
+
+
+def test_find_best_model_run_excludes_candidates_below_min_metric(
+    tracking: Path,
+) -> None:
+    good = _log_run(0.90)
+    _log_run(0.60)  # below the floor, never a candidate even if it were fastest
+
+    run = mlflow_tracking.find_best_model_run(
+        "test_exp", "validation_macro_f1", False, min_metric=0.75
+    )
+
+    assert run.info.run_id == good
+
+
+def test_find_best_model_run_raises_when_nothing_clears_min_metric(
+    tracking: Path,
+) -> None:
+    _log_run(0.60)
+    _log_run(0.65)
+
+    with pytest.raises(ValueError, match="no run"):
+        mlflow_tracking.find_best_model_run(
+            "test_exp", "validation_macro_f1", False, min_metric=0.75
+        )
 
 
 def test_find_best_model_run_missing_experiment(tracking: Path) -> None:

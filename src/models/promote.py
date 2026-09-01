@@ -33,10 +33,13 @@ def promote_best_run(experiment_name: str, reg: RegistryConfig) -> dict:
         reg.ascending,
         reg.tiebreak_metric,
         reg.tiebreak_ascending,
+        reg.latency_metric,
+        reg.accuracy_tolerance,
+        reg.min_metric,
     )
     version = register_model(best.info.run_id, reg.model_name, stage="Staging")
     promote_model(reg.model_name, version, stage=reg.stage)
-    return {
+    record = {
         "model_name": reg.model_name,
         "version": version,
         "stage": reg.stage,
@@ -44,6 +47,13 @@ def promote_best_run(experiment_name: str, reg: RegistryConfig) -> dict:
         "metric": reg.metric,
         "value": best.data.metrics.get(reg.metric),
     }
+    if reg.min_metric is not None:
+        record["min_metric"] = reg.min_metric
+    if reg.latency_metric:
+        record["latency_metric"] = reg.latency_metric
+        record["latency_value"] = best.data.metrics.get(reg.latency_metric)
+        record["accuracy_tolerance"] = reg.accuracy_tolerance
+    return record
 
 
 def main() -> None:

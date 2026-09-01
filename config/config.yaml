@@ -101,6 +101,22 @@ registry:
   ascending: false
   tiebreak_metric: cv_macro_f1_std
   tiebreak_ascending: true
+  # Piso de negocio: nenhum run abaixo disso e candidato a promocao, mesmo
+  # que seja o unico disponivel ou o mais rapido — falha alto em vez de
+  # promover um modelo ruim. 0.75 ja exclui Gradient Boosting (0.629,
+  # documentado como nao competitivo neste corpus) e fica perto da producao
+  # atual (0.7768). Ver docs/model_card.md secao "Piso de qualidade e
+  # desempate por latencia" para a justificativa completa.
+  min_metric: 0.75
+  # Entre runs que passam no piso, ate essa distancia do melhor
+  # cv_macro_f1_mean (mesmo limiar de ruido citado acima) e tratado como
+  # empate estatistico — decidido por latencia_metric abaixo em vez do
+  # primeiro por ordem de tiebreak.
+  accuracy_tolerance: 0.015
+  # So desempata empates estatisticos (nunca troca acuracia real por
+  # velocidade): entre os empatados, vence o de menor latencia no backend
+  # real de producao (ONNX). Sem teto maximo de latencia de proposito.
+  latency_metric: latency_onnx_mean_ms
   stage: Production
 
 tuning:
