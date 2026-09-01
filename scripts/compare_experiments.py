@@ -16,12 +16,19 @@ BERT does not go through ``config.yaml``: it is a separate script
 without touching ``models/artifacts/`` — so it is opt-in via ``--include-bert``
 and never needs a restore step.
 
+Every experiment (not just the final retrain) also gets export-onnx +
+scripts.measure_latency run against it, best-effort, so its MLflow run has
+``registry.latency_metric`` before ``make promote`` runs at the end — no
+separate ``make benchmark-latency`` step needed. Skip with
+``--no-latency-benchmark`` if you want a faster comparison run.
+
 Uso:
     poetry run python -m scripts.compare_experiments
     poetry run python -m scripts.compare_experiments --include-bert
     poetry run python -m scripts.compare_experiments --experiments \
         logistic_regression_tfidf gradient_boosting_tfidf
     poetry run python -m scripts.compare_experiments --no-promote
+    poetry run python -m scripts.compare_experiments --no-latency-benchmark
 """
 
 from __future__ import annotations
@@ -39,6 +46,7 @@ from src.utils.config_loader import CONFIG_PATH, load_config
 
 ROOT = Path(__file__).resolve().parent.parent
 COMPARISON_PATH = ROOT / "metrics" / "experiment_comparison.json"
+LATENCY_PATH = ROOT / "metrics" / "latency_comparison.json"
 BERT_OUTPUT_DIR = ROOT / "models" / "bert_experiment"
 
 # Both keys sit on the line right after their section header in config.yaml,
@@ -120,10 +128,38 @@ def _read_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
 
 
-def _train_and_evaluate(metadata_path: Path, metrics_path: Path) -> dict:
-    """Run train + evaluate and collect the metrics they persisted."""
+def _benchmark_latency_best_effort() -> dict:
+    """Export to ONNX, benchmark latency, and return the comparison dict.
+
+    Runs after every experiment (not just the final one) so both
+    ``registry.latency_metric`` (make promote) and the demo's per-candidate
+    table have a real number for any candidate that might tie with another
+    on accuracy — not only whichever config happens to be retrained last.
+    Best-effort: a GPU-trained gradient_boosting run (TRAINING_DEVICE=cuda)
+    uses XGBoost, which has no ONNX converter here
+    (src/optimization/export_onnx.py) — skip with a warning and return {}
+    instead of failing the whole comparison, or reusing a stale JSON left
+    over from a previous experiment.
+    """
+    try:
+        _run("src.optimization.export_onnx")
+        _run("scripts.measure_latency")
+    except subprocess.CalledProcessError as exc:
+        print(
+            f"  aviso: export-onnx/benchmark-latency falhou ({exc}); "
+            "seguindo sem latencia para este run."
+        )
+        return {}
+    return _read_json(LATENCY_PATH)
+
+
+def _train_and_evaluate(
+    metadata_path: Path, metrics_path: Path, benchmark_latency: bool
+) -> dict:
+    """Run train + evaluate (+ latency benchmark) and collect persisted metrics."""
     _run("src.training.trainer")
     _run("src.evaluation.evaluate")
+    latency = _benchmark_latency_best_effort() if benchmark_latency else {}
     metadata = _read_json(metadata_path)
     metrics = _read_json(metrics_path)
     return {
@@ -132,6 +168,7 @@ def _train_and_evaluate(metadata_path: Path, metrics_path: Path) -> dict:
         "cv_macro_f1_std": metadata.get("cv_macro_f1_std"),
         "model_parameters": metadata.get("model_parameters"),
         "test": metrics.get("test", {}),
+        "latency": latency,
     }
 
 
@@ -218,7 +255,17 @@ def main() -> None:
         action="store_true",
         help="Nao roda 'make promote' (src.models.promote) ao final.",
     )
+    parser.add_argument(
+        "--no-latency-benchmark",
+        action="store_true",
+        help=(
+            "Nao roda export-onnx/measure_latency apos cada experimento. "
+            "registry.latency_metric (make promote) fica sem numero para "
+            "desempatar candidatos ate rodar 'make benchmark-latency' a parte."
+        ),
+    )
     args = parser.parse_args()
+    benchmark_latency = not args.no_latency_benchmark
 
     config = load_config()
     metadata_path = config.artifacts.model_path / config.artifacts.metadata_file
@@ -240,7 +287,9 @@ def main() -> None:
                 encoding="utf-8",
             )
             last_selection = (experiment.model_type, experiment.features_type)
-            outcome = _train_and_evaluate(metadata_path, metrics_path)
+            outcome = _train_and_evaluate(
+                metadata_path, metrics_path, benchmark_latency
+            )
             results[key] = {
                 "label": experiment.label,
                 "model_type": experiment.model_type,
@@ -261,7 +310,7 @@ def main() -> None:
             "models/artifacts/ (o que src/serving/model_loader.py de fato "
             "serve) ao estado de producao..."
         )
-        _train_and_evaluate(metadata_path, metrics_path)
+        _train_and_evaluate(metadata_path, metrics_path, benchmark_latency)
 
     if args.include_bert:
         print("\n=== BERT (bert-base-uncased, fine-tuned) ===")

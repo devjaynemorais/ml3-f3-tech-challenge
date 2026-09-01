@@ -86,10 +86,12 @@ finetune-bert:
 pipeline: dataset train evaluate export-onnx benchmark-latency
 
 # Treina+avalia os 3 combos sklearn oficiais (docs/metodologia_experimentos.md),
-# restaura config.yaml e re-treina a config original no final (mantém
+# com export-onnx + benchmark de latencia apos cada um (registry.latency_metric
+# ja fica disponivel para o promote, sem precisar rodar benchmark-latency a
+# parte). Restaura config.yaml e re-treina a config original no final (mantém
 # models/artifacts/ no modelo de produção), depois promove o melhor run.
 # Ver scripts/compare_experiments.py para opções (--include-bert, --no-promote,
-# --experiments <subset>).
+# --no-latency-benchmark, --experiments <subset>).
 experiments:
 	$(POETRY) run python -m scripts.compare_experiments
 
