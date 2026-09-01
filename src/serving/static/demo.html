@@ -199,8 +199,6 @@
   .stepper-body { flex: 1; padding-bottom: 2px; }
   .stepper-body h4 { margin: 2px 0 4px; font-size: 0.95rem; color: var(--text); }
   .stepper-body p { margin: 0; font-size: 0.85rem; color: var(--text-dim); max-width: 62ch; }
-  .stage-tag { display: inline-flex; align-items: center; gap: 4px; font-family: ui-monospace, monospace; font-size: 0.64rem; color: var(--text-dim); border: 1px solid var(--line); border-radius: 99px; padding: 1px 8px; margin-top: 8px; }
-  .stage-tag::before { content: "●"; font-size: 0.5rem; }
 
   /* ── Results: stat tiles + honest multi-label callout ─────────────────── */
   .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin: 16px 0; }
@@ -303,7 +301,6 @@
         <p>Agrega labels por abstract separadamente em treino/teste, remove do treino
         os 988 textos presentes no teste e só então separa 10% para validação. O teste
         nunca participa do fit.</p>
-        <span class="stage-tag">offline</span>
       </div>
     </div>
     <div class="stepper-node">
@@ -313,7 +310,6 @@
         <p>Strategy chain: normalização Unicode, remoção de pontuação, lematização
         (spaCy <code>en_core_web_sm</code>) e remoção de stopwords (NLTK) —
         <code>src/features/text_preprocessing.py</code>.</p>
-        <span class="stage-tag">offline</span>
       </div>
     </div>
     <div class="stepper-node">
@@ -323,7 +319,6 @@
         <p>TF-IDF (5.000 termos, unigramas+bigramas, min_df=2) por padrão, ou embeddings
         biomédicos scispaCy <code>en_core_sci_md</code> — selecionável no
         <code>config.yaml</code>.</p>
-        <span class="stage-tag">offline</span>
       </div>
     </div>
     <div class="stepper-node">
@@ -333,7 +328,6 @@
         <p>One-vs-Rest treina uma decisão binária por categoria sobre a Strategy
         configurada; o padrão é Regressão Logística balanceada. A busca usa F1-macro
         multilabel em CV 3-fold quando <code>tuning.enabled</code>.</p>
-        <span class="stage-tag">offline</span>
       </div>
     </div>
     <div class="stepper-node">
@@ -343,7 +337,6 @@
         <p>Métricas multilabel de verdade — Hamming loss, Jaccard por amostra,
         F1 macro/micro/weighted e recall médio das classes minoritárias — em
         validação e teste, registradas no MLflow junto do run de treino.</p>
-        <span class="stage-tag">offline</span>
       </div>
     </div>
     <div class="stepper-node">
@@ -351,9 +344,10 @@
       <div class="stepper-body">
         <h4>export-onnx + promote</h4>
         <p>Classificador convertido para ONNX Runtime (~18% menos latência).
-        <code>make promote</code> registra no MLflow Model Registry e promove para
-        Production o run com melhor <code>cv_macro_f1_mean</code>.</p>
-        <span class="stage-tag">offline</span>
+        <code>make promote</code> só considera runs acima de um piso de
+        qualidade; entre os empatados dentro da margem de ruído estatístico,
+        promove o de menor latência ONNX — nunca troca acurácia real por
+        velocidade. Ver "Comparação final dos modelos" abaixo.</p>
       </div>
     </div>
   </div>
@@ -401,8 +395,9 @@
     <div class="card">
       <h4>📊 MLflow</h4>
       <p>Cada <code>make train</code> registra hiperparâmetros, métricas e o pipeline
-      treinado; <code>make promote</code> promove pelo melhor <code>cv_macro_f1_mean</code>
-      (desempate por menor desvio entre folds).</p>
+      treinado. <code>make promote</code>: piso de qualidade em
+      <code>cv_macro_f1_mean</code>, empate estatístico decidido por menor
+      latência ONNX — nunca acurácia real por velocidade.</p>
       <span class="port-tag">:5000</span>
     </div>
     <div class="card">
@@ -472,6 +467,8 @@ async function loadExperimentResults() {
       .sort((a, b) => (b.cv_macro_f1_mean ?? -Infinity) - (a.cv_macro_f1_mean ?? -Infinity))
       .map((candidate) => {
         const winner = candidate.key === data.winner_key;
+        const sklearnMs = candidate.latency_sklearn_p99_ms;
+        const onnxMs = candidate.latency_onnx_p99_ms;
         return `<tr class="${winner ? "winner" : ""}">
           <td>${escapeHtml(candidate.label)} ${winner ? '<span class="winner-mark">★ vencedor</span>' : ""}</td>
           <td class="num">${fmtPct(candidate.cv_macro_f1_mean)}</td>
@@ -480,6 +477,8 @@ async function loadExperimentResults() {
           <td class="num">${fmtPct(candidate.ml_accuracy)}</td>
           <td class="num">${fmtPct(candidate.test_accuracy)}</td>
           <td class="num">${fmtPct(candidate.minority_recall)}</td>
+          <td class="num">${sklearnMs == null ? "—" : `${fmtNum(sklearnMs, 2)}ms`}</td>
+          <td class="num">${onnxMs == null ? "—" : `${fmtNum(onnxMs, 2)}ms`}</td>
         </tr>`;
       }).join("");
     const winner = data.candidates.find((candidate) => candidate.key === data.winner_key);
@@ -487,10 +486,15 @@ async function loadExperimentResults() {
     const promotionText = promoted
       ? `O MLflow registrou <code>${escapeHtml(promoted.model_name)}</code> v${escapeHtml(promoted.version)} em <b>${escapeHtml(promoted.stage)}</b>, com ${escapeHtml(promoted.metric)} = ${fmtPct(promoted.value)}.`
       : "O arquivo da promoção ainda não foi gerado; execute <code>make promote</code>.";
-    container.innerHTML = `<div class="tbl-wrap"><table>
-      <thead><tr><th>modelo</th><th class="num">CV F1-macro ↑</th><th class="num">desvio CV ↓</th><th class="num">F1 teste ★</th><th class="num">accuracy Jaccard ★</th><th class="num">accuracy exata</th><th class="num">recall minorias</th></tr></thead>
+    const criteriaStats = data.selection.min_metric == null ? "" : `<div class="stats">
+      <div class="stat featured"><span class="stat-value">${fmtPct(data.selection.min_metric)}</span><span class="stat-label">piso mínimo · ${escapeHtml(data.selection.primary_metric)}</span></div>
+      <div class="stat"><span class="stat-value">±${fmtPct(data.selection.accuracy_tolerance)}</span><span class="stat-label">faixa de empate estatístico</span></div>
+      <div class="stat"><span class="stat-value">${data.selection.latency_used ? "média ONNX" : "não configurado"}</span><span class="stat-label">desempate dentro da faixa</span></div>
+    </div>`;
+    container.innerHTML = `${criteriaStats}<div class="tbl-wrap"><table>
+      <thead><tr><th>modelo</th><th class="num">CV F1-macro ↑</th><th class="num">desvio CV ↓</th><th class="num">F1 teste ★</th><th class="num">accuracy Jaccard ★</th><th class="num">accuracy exata</th><th class="num">recall minorias</th><th class="num">sklearn p99</th><th class="num">ONNX p99 ↓</th></tr></thead>
       <tbody>${rows}</tbody></table></div>
-      <div class="callout"><p><b>Por que ${escapeHtml(winner.label)} venceu:</b>
+      <div class="callout"><p><b>Por que ${escapeHtml(winner.label)} venceu nesta tabela:</b>
       teve o maior <code>${escapeHtml(data.selection.primary_metric)}</code> (${fmtPct(winner.cv_macro_f1_mean)}).
       Em caso de empate, vence o menor <code>${escapeHtml(data.selection.tiebreak_metric)}</code>, isto é, o modelo mais estável entre os folds.
       As métricas do teste são exibidas para avaliação final, mas não escolhem o vencedor, preservando o teste oficial.
@@ -498,8 +502,27 @@ async function loadExperimentResults() {
       média entre rótulos previstos e verdadeiros por abstract) tratam corretamente abstracts com
       mais de um rótulo válido; priorize-as. <b>accuracy exata</b> exige acerto simultâneo de
       todos os rótulos do abstract e tende a subestimar o desempenho real — ver
-      <code>docs/model_card.md#avaliação</code>.
-      <b>Latência não participa da promoção atual</b>; ela é medida separadamente no benchmark.
+      <code>docs/model_card.md#avaliação</code>.</p></div>
+      <div class="callout"><p><b>O que <code>make promote</code> faz de verdade (contra todo o
+      histórico do MLflow, não só estes 3 candidatos):</b>
+      ${data.selection.min_metric != null
+        ? `um run só é elegível com <code>${escapeHtml(data.selection.primary_metric)}</code>
+           &gt;= <b>${fmtPct(data.selection.min_metric)}</b> — abaixo disso a promoção falha
+           alto em vez de subir um modelo ruim. Um piso de negócio, não estatístico: erro de
+           triagem custa retrabalho de revisão humana e confiança na ferramenta, o que pesa
+           mais que qualquer economia de infraestrutura.`
+        : "nenhum piso de qualidade configurado — qualquer run com artefato é elegível."}
+      ${data.selection.latency_used
+        ? ` Entre os runs que passam nesse piso, quem estiver a até
+           <b>${fmtPct(data.selection.accuracy_tolerance)}</b> do melhor
+           <code>${escapeHtml(data.selection.primary_metric)}</code> é tratado como empate
+           estatístico (mesmo limiar de ruído citado acima, não é outro número inventado) — e
+           dentro desse empate, vence o de menor
+           <code>${escapeHtml(data.selection.latency_metric)}</code> (backend real de
+           produção). Latência só desempata ruído por ruído: uma diferença real de acurácia
+           sempre vence, e não existe teto máximo de latência — poucos ms a mais nunca
+           justificam abrir mão de um modelo genuinamente melhor.`
+        : " Latência ainda não participa da promoção (registry.latency_metric não configurado)."}
       ${promotionText}</p></div>`;
   } catch (error) {
     container.innerHTML = `<p class="results-status">Não foi possível carregar a comparação: ${escapeHtml(error.message)}. Execute <code>make experiments</code> e recarregue a página.</p>`;

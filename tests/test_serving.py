@@ -199,7 +199,10 @@ def test_demo_experiment_results_explains_model_selection() -> None:
     assert len(body["candidates"]) >= 3
     assert body["selection"]["primary_metric"] == "cv_macro_f1_mean"
     assert body["selection"]["tiebreak_metric"] == "cv_macro_f1_std"
-    assert body["selection"]["latency_used"] is False
+    assert body["selection"]["min_metric"] == pytest.approx(0.75)
+    assert body["selection"]["accuracy_tolerance"] == pytest.approx(0.015)
+    assert body["selection"]["latency_metric"] == "latency_onnx_mean_ms"
+    assert body["selection"]["latency_used"] is True
     winner = next(
         candidate
         for candidate in body["candidates"]

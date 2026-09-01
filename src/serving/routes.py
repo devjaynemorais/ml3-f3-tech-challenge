@@ -117,6 +117,7 @@ def experiment_results() -> dict:
     candidates = []
     for key, result in comparison.items():
         test = result.get("test", {})
+        latency = result.get("latency") or {}
         candidates.append(
             {
                 "key": key,
@@ -128,6 +129,9 @@ def experiment_results() -> dict:
                 "test_accuracy": test.get("accuracy"),
                 "ml_accuracy": test.get("jaccard_samples"),
                 "minority_recall": test.get("minority_class_recall_mean"),
+                "latency_sklearn_p99_ms": latency.get("sklearn", {}).get("p99_ms"),
+                "latency_onnx_p99_ms": latency.get("onnx", {}).get("p99_ms"),
+                "latency_speedup_x": latency.get("speedup_x"),
             }
         )
 
@@ -160,7 +164,10 @@ def experiment_results() -> dict:
             "tiebreak_direction": (
                 "ascending" if registry.tiebreak_ascending else "descending"
             ),
-            "latency_used": False,
+            "min_metric": registry.min_metric,
+            "accuracy_tolerance": registry.accuracy_tolerance,
+            "latency_metric": registry.latency_metric,
+            "latency_used": registry.latency_metric is not None,
         },
         "promoted": promoted,
     }
