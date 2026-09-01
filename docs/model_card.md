@@ -105,6 +105,55 @@ Os números vigentes são gerados por `make experiments` em
 `metrics/experiment_comparison.json`; a demo lê esse arquivo diretamente para
 evitar tabelas desatualizadas.
 
+#### Piso de qualidade e desempate por latência (`registry.min_metric`/`latency_metric`)
+
+`make promote` (`src/utils/mlflow_tracking.py::find_best_model_run`) aplica
+três critérios em sequência, nesta ordem — cada um existe para responder uma
+pergunta de negócio distinta, não é só ajuste estatístico:
+
+1. **Piso de qualidade — `registry.min_metric: 0.75`.** Nenhum run abaixo
+   disso é sequer candidato a promoção, mesmo que seja o único disponível ou
+   o mais rápido — a promoção falha alto (erro) em vez de subir um modelo
+   ruim silenciosamente. **Por quê 0.75:** é o piso que já exclui o Gradient
+   Boosting (`cv_macro_f1_mean` 0.629 — documentado acima como não
+   competitivo neste corpus) do pipeline automático de promoção, e fica
+   perto o suficiente da produção atual (0.7768) para que só variações
+   marginais de re-treino sejam aceitas sem revisão humana. Do ponto de
+   vista de negócio: um classificador de triagem errado com frequência gera
+   retrabalho de revisão manual e corrói a confiança de quem usa a
+   ferramenta — isso custa mais caro do que qualquer economia de infra, e
+   nenhuma vantagem de latência compensa. O piso também é uma rede de
+   segurança operacional: se `config.yaml` for editado incorretamente (já
+   aconteceu durante o desenvolvimento — ver histórico do repositório) e o
+   retreino cair para um modelo muito pior, a promoção automática bloqueia
+   em vez de substituir a produção por engano.
+2. **Faixa de empate — `registry.accuracy_tolerance: 0.015`.** Entre os runs
+   que passaram no piso, qualquer um com `cv_macro_f1_mean` até 0.015 abaixo
+   do melhor é tratado como estatisticamente empatado (é o mesmo limiar de
+   ruído do parágrafo anterior — não é um segundo número inventado). **Por
+   quê importa para o negócio:** sem essa faixa, a escolha do modelo de
+   produção poderia mudar entre re-treinos por puro ruído do split, tratando
+   custo de infraestrutura como irrelevante mesmo quando dois modelos são,
+   na prática, o mesmo modelo com sorte diferente na validação.
+3. **Desempate — `registry.latency_metric: latency_onnx_mean_ms`.** Só entre
+   os runs empatados na faixa acima, vence o de menor latência média no
+   backend ONNX (o backend de produção — ver `MODEL_BACKEND=onnx`). **Por
+   quê ONNX e não sklearn:** é o número que reflete o custo real de servir
+   em produção. Latência menor significa mais requisições por segundo com o
+   mesmo hardware (custo de infraestrutura) e resposta mais rápida para
+   quem usa a ferramenta — um ganho "de graça" quando a qualidade já é
+   estatisticamente a mesma. Runs sem essa métrica (ninguém rodou `make
+   benchmark-latency` ainda) caem de volta no critério antigo, então isso
+   nunca bloqueia uma promoção por falta de dado.
+
+**O que este critério deliberadamente não faz:** não existe um teto máximo de
+latência. Uma diferença real de acurácia (fora da faixa de ruído) sempre
+vence, custe o que custar em milissegundos — poucos ms a mais por requisição
+não mudam a experiência nem o custo de forma perceptível neste volume de
+uso, mas um modelo pior classificando errado tem custo operacional real.
+Travar por latência arriscaria rejeitar um modelo genuinamente melhor por um
+motivo de infraestrutura que nem é o gargalo do sistema.
+
 ## Avaliação
 
 `make evaluate` grava `metrics/eval_metrics.json` com subset accuracy, Hamming
