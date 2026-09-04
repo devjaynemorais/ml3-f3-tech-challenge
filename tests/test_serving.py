@@ -1,10 +1,76 @@
+import json
 import logging
 
 import pytest
 from fastapi.testclient import TestClient
 
 import src.serving.api as api_module
+import src.serving.routes as routes_module
 from src.utils.config_loader import CANONICAL_LABELS
+
+# Amostras herméticas para os endpoints /demo/experiment-results e
+# /demo/latency-comparison: os testes escrevem estes JSONs em tmp_path e
+# apontam as constantes de caminho do módulo para lá, sem depender de
+# `make experiments` nem de arquivos versionados no repositório.
+_SAMPLE_COMPARISON = {
+    "logistic_regression_tfidf": {
+        "label": "Logistic Regression + TF-IDF",
+        "mlflow_run_id": "run-lr",
+        "cv_macro_f1_mean": 0.78,
+        "cv_macro_f1_std": 0.004,
+        "test": {"accuracy": 0.83, "macro_avg": {"f1": 0.80}},
+        "latency": {
+            "onnx": {"p99_ms": 1.9},
+            "sklearn": {"p99_ms": 2.5},
+            "speedup_x": 1.3,
+        },
+    },
+    "gradient_boosting_tfidf": {
+        "label": "Gradient Boosting + TF-IDF",
+        "mlflow_run_id": "run-gb",
+        "cv_macro_f1_mean": 0.80,
+        "cv_macro_f1_std": 0.006,
+        "test": {"accuracy": 0.84, "macro_avg": {"f1": 0.81}},
+        "latency": {
+            "onnx": {"p99_ms": 3.1},
+            "sklearn": {"p99_ms": 4.0},
+            "speedup_x": 1.29,
+        },
+    },
+    "logistic_regression_embeddings": {
+        "label": "Logistic Regression + Embeddings",
+        "mlflow_run_id": "run-emb",
+        "cv_macro_f1_mean": 0.77,
+        "cv_macro_f1_std": 0.005,
+        "test": {"accuracy": 0.82, "macro_avg": {"f1": 0.79}},
+        "latency": {
+            "onnx": {"p99_ms": 2.2},
+            "sklearn": {"p99_ms": 2.8},
+            "speedup_x": 1.27,
+        },
+    },
+}
+_SAMPLE_LATENCY = {
+    "n_runs": 200,
+    "sklearn": {"mean_ms": 1.74, "p99_ms": 2.56},
+    "onnx": {"mean_ms": 1.47, "p99_ms": 1.95},
+    "speedup_x": 1.19,
+}
+
+
+def _prepare_demo_metrics(
+    monkeypatch, tmp_path, *, comparison=_SAMPLE_COMPARISON, latency=_SAMPLE_LATENCY
+) -> None:
+    """Point the demo endpoints at temp JSON files (or a missing path if None)."""
+    comparison_path = tmp_path / "experiment_comparison.json"
+    if comparison is not None:
+        comparison_path.write_text(json.dumps(comparison), encoding="utf-8")
+    monkeypatch.setattr(routes_module, "_EXPERIMENT_COMPARISON_PATH", comparison_path)
+
+    latency_path = tmp_path / "latency_comparison.json"
+    if latency is not None:
+        latency_path.write_text(json.dumps(latency), encoding="utf-8")
+    monkeypatch.setattr(routes_module, "_LATENCY_COMPARISON_PATH", latency_path)
 
 
 class _FakePredictor:
@@ -190,7 +256,10 @@ def test_sample_texts_covers_the_five_canonical_categories() -> None:
     assert all(sample["text"].strip() for sample in body)
 
 
-def test_demo_experiment_results_explains_model_selection() -> None:
+def test_demo_experiment_results_explains_model_selection(
+    monkeypatch, tmp_path
+) -> None:
+    _prepare_demo_metrics(monkeypatch, tmp_path)
     with TestClient(api_module.create_app(lambda: _FakePredictor())) as client:
         response = client.get("/demo/experiment-results")
 
@@ -203,6 +272,7 @@ def test_demo_experiment_results_explains_model_selection() -> None:
     assert body["selection"]["accuracy_tolerance"] == pytest.approx(0.015)
     assert body["selection"]["latency_metric"] == "latency_onnx_mean_ms"
     assert body["selection"]["latency_used"] is True
+    assert body["winner_key"] == "gradient_boosting_tfidf"
     winner = next(
         candidate
         for candidate in body["candidates"]
@@ -213,6 +283,34 @@ def test_demo_experiment_results_explains_model_selection() -> None:
         for candidate in body["candidates"]
         if candidate["cv_macro_f1_mean"] is not None
     )
+
+
+def test_demo_experiment_results_unavailable_returns_503(monkeypatch, tmp_path) -> None:
+    _prepare_demo_metrics(monkeypatch, tmp_path, comparison=None)
+    with TestClient(api_module.create_app(lambda: _FakePredictor())) as client:
+        response = client.get("/demo/experiment-results")
+
+    assert response.status_code == 503
+
+
+def test_demo_latency_comparison_returns_benchmark(monkeypatch, tmp_path) -> None:
+    _prepare_demo_metrics(monkeypatch, tmp_path)
+    with TestClient(api_module.create_app(lambda: _FakePredictor())) as client:
+        response = client.get("/demo/latency-comparison")
+
+    body = response.json()
+    assert response.status_code == 200
+    assert set(body) >= {"sklearn", "onnx", "speedup_x"}
+    assert body["speedup_x"] == pytest.approx(1.19)
+    assert "mean_ms" in body["onnx"]
+
+
+def test_demo_latency_comparison_unavailable_returns_503(monkeypatch, tmp_path) -> None:
+    _prepare_demo_metrics(monkeypatch, tmp_path, latency=None)
+    with TestClient(api_module.create_app(lambda: _FakePredictor())) as client:
+        response = client.get("/demo/latency-comparison")
+
+    assert response.status_code == 503
 
 
 def test_demo_page_is_served_as_html() -> None:

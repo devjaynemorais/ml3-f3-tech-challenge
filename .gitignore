@@ -102,6 +102,10 @@ models/promoted_model.json
 # Métricas geradas em runtime
 metrics/*.json
 !metrics/.gitkeep
+# Artefatos de comparação curados: servidos pela API (/demo/*) e embutidos na
+# imagem Docker (COPY no Dockerfile), portanto versionados propositalmente.
+!metrics/experiment_comparison.json
+!metrics/latency_comparison.json
 
 # Airflow (gerado localmente pelo docker-compose.airflow.yml)
 airflow/logs/
