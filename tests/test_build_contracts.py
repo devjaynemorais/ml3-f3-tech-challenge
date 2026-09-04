@@ -36,6 +36,12 @@ def test_api_receives_demo_experiment_results() -> None:
     assert "./metrics:/app/metrics:ro" in compose["services"]["api"]["volumes"]
 
 
+def test_api_receives_demo_latency_comparison() -> None:
+    dockerfile = _read("Dockerfile")
+
+    assert "COPY metrics/latency_comparison.json" in dockerfile
+
+
 def test_airflow_uses_reproducible_custom_image() -> None:
     dockerfile = _read("Dockerfile.airflow")
     compose_text = _read("docker-compose.airflow.yml")

@@ -142,7 +142,5 @@ def test_factory_reports_missing_spacy_model(
     monkeypatch.setattr(preprocessing.spacy, "load", _missing)
 
     with pytest.raises(RuntimeError, match="spaCy model.*make install"):
-        strategy = preprocessing.PreprocessingFactory.create(
-            "lemmatization", _config()
-        )
+        strategy = preprocessing.PreprocessingFactory.create("lemmatization", _config())
         strategy.transform("patient")

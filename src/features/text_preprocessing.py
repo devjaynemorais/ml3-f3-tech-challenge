@@ -76,9 +76,7 @@ class PunctuationRemovalStrategy:
 class LemmatizationStrategy:
     """Tokenize and lemmatize text with a preloaded spaCy pipeline."""
 
-    def __init__(
-        self, model_name: str, nlp: NlpPipeline | None = None
-    ) -> None:
+    def __init__(self, model_name: str, nlp: NlpPipeline | None = None) -> None:
         self.model_name = model_name
         self.nlp = nlp
 

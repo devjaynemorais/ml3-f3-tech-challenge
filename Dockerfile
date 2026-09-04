@@ -56,6 +56,7 @@ COPY --from=builder /app/.venv /app/.venv
 COPY src/ src/
 COPY config/ config/
 COPY metrics/experiment_comparison.json metrics/experiment_comparison.json
+COPY metrics/latency_comparison.json metrics/latency_comparison.json
 
 ENV PATH="/app/.venv/bin:$PATH" \
     NLTK_DATA=/app/.venv/nltk_data \
