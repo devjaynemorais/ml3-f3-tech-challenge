@@ -30,8 +30,15 @@ services:
       target: train
     image: ml3-f3-tech-challenge-train
     env_file: .env
+    # Escreve nos mesmos volumes (data/models/metrics) que o Airflow, então roda
+    # sob o mesmo UID (AIRFLOW_UID) para que os artefatos fiquem co-pertencentes
+    # e reescrevíveis por ambos os stacks — rodar como root criaria arquivos
+    # 0644 que o container Airflow (UID 50000) não consegue sobrescrever.
+    user: "${AIRFLOW_UID:-50000}:0"
     environment:
       MLFLOW_TRACKING_URI: http://mlflow:5000
+      # UID de serviço não tem home no filesystem; aponta caches para um dir gravável.
+      HOME: /tmp
     volumes:
       - ./data:/app/data
       - ./models:/app/models
