@@ -9,6 +9,12 @@ O sistema é uma demonstração técnica de apoio à categorização e prioriza�
 Ele não realiza diagnóstico, não representa triagem hospitalar real e não
 substitui revisão humana ou validação clínica.
 
+## Vídeo STAR da apresentação
+
+A apresentação do projeto no formato STAR está disponível no YouTube:
+
+[Assistir ao vídeo STAR](https://youtu.be/otX_U_mz_kk)
+
 ## Categorias
 
 A ordem canônica usada em configuração, artefatos e respostas da API é:
